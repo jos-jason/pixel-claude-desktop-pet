@@ -12,6 +12,7 @@ import json
 import math
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from gi.repository import Gdk, GLib, GLibUnix, Graphene, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LS  # noqa: E402
 
 CELL = 6            # logical px per sprite pixel
-GW, GH = 26, 22     # window size in cells
+GW, GH = 30, 22     # window size in cells (wide enough for the Omarchy wordmark)
 GROUND = GH - 1     # feet rest here; the last cell holds his shadow
 FPS = 30
 
@@ -140,6 +141,53 @@ GLYPHS = {
     "flake": [".w.", "www", ".w."],
 }
 DREAMS = ["tree", "trail", "binoculars"]
+
+# The Omarchy wordmark, exactly as /usr/share/omarchy/logo.txt draws it in half blocks.
+LOGO_TXT = [
+    '                 ▄▄▄',
+    ' ▄█████▄    ▄███████████▄    ▄███████   ▄███████   ▄███████   ▄█   █▄    ▄█   █▄',
+    '███   ███  ███   ███   ███  ███   ███  ███   ███  ███   ███  ███   ███  ███   ███',
+    '███   ███  ███   ███   ███  ███   ███  ███   ███  ███   █▀   ███   ███  ███   ███',
+    '███   ███  ███   ███   ███ ▄███▄▄▄███ ▄███▄▄▄██▀  ███       ▄███▄▄▄███▄ ███▄▄▄███',
+    '███   ███  ███   ███   ███ ▀███▀▀▀███ ▀███▀▀▀▀    ███      ▀▀███▀▀▀███  ▀▀▀▀▀▀███',
+    '███   ███  ███   ███   ███  ███   ███ ██████████  ███   █▄   ███   ███  ▄██   ███',
+    '███   ███  ███   ███   ███  ███   ███  ███   ███  ███   ███  ███   ███  ███   ███',
+    ' ▀█████▀    ▀█   ███   █▀   ███   █▀   ███   ███  ███████▀   ███   █▀    ▀█████▀',
+    '                                       ███   █▀',
+]
+
+
+def _logo_pixels(lines):
+    halves = {" ": "..", "\u2588": "xx", "\u2580": "x.", "\u2584": ".x"}
+    w = max(map(len, lines))
+    rows = []
+    for line in lines:
+        cells = [halves.get(ch, "..") for ch in line.ljust(w)]
+        rows += ["".join(c[0] for c in cells), "".join(c[1] for c in cells)]
+    return [r for r in rows if "x" in r]
+
+
+LOGO = _logo_pixels(LOGO_TXT)
+# Color schemes for the wordmark: (bubble background, letter colors left to right).
+LOGO_SCHEMES = [
+    ("#121212", ["#9ECE6A"]),               # terminal green, like omarchy-show-logo
+    ("#1A1B26", ["#7AA2F7"]),               # Tokyo Night
+    ("#1E1E2E", ["#F38BA8", "#FAB387", "#F9E2AF", "#A6E3A1", "#94E2D5", "#89B4FA", "#CBA6F7"]),  # Catppuccin rainbow
+    ("#282828", ["#D8A657"]),               # Gruvbox
+    ("#121212", ["#E68E0D"]),               # Matte Black
+    ("#FAF4ED", ["#56949F"]),               # Rosé Pine
+]
+THEME_COLORS = os.path.expanduser("~/.local/state/omarchy/current/theme/colors.toml")
+
+
+def current_theme_scheme():
+    """The running Omarchy theme's background and accent, if it can be read."""
+    try:
+        with open(THEME_COLORS) as f:
+            colors = dict(re.findall(r'^(\w+)\s*=\s*"(#[0-9A-Fa-f]{6})"', f.read(), re.M))
+        return colors["background"], [colors["accent"]]
+    except (OSError, KeyError):
+        return None
 
 # Props and costumes for the seasonal acts, drawn at half-cell pixels.
 SPRITES = {
@@ -335,7 +383,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "coffee": (2, 4, 7),
     "daydream": (0, 7, 10),  # only when you've been at the computer a long time
     "festive": (0, 8, 12),   # only around holidays and once in a while each season
-    "omarchy": (1, 5, 7),    # a happy thought about Omarchy
+    "omarchy": (0.6, 5, 7),  # a happy thought about Omarchy
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -502,8 +550,13 @@ class Buddy:
             self.facing = random.choice((-1, 1))
             self.dream = random.choice(DREAMS)  # one scene for the whole daydream
             self.last_dream = time.time()
-        elif name == "omarchy":
-            self.dream = "omarchy"  # shown in the same thought bubble as a daydream
+        elif name == "omarchy":  # the icon, or the wordmark in one of several color schemes
+            self.dream = "omarchy"
+            schemes = LOGO_SCHEMES + [current_theme_scheme()] * 2
+            self.logo = None if random.random() < 0.25 else random.choice([x for x in schemes if x])
+            if self.logo:
+                bg, fgs = self.logo
+                self.logo = (rgba(bg), [rgba(c) for c in fgs])
 
     def next_activity(self):
         c = self.claude
@@ -913,7 +966,7 @@ class Buddy:
                 p["jump"] = 2.5 * math.sin(math.pi * st / 0.6)
                 p["arms"] = ["up", "up"]
             else:
-                p["bubble"] = ("dream",)
+                p["bubble"] = ("logo",) if self.logo else ("dream",)
                 p["bob"] = 0.5 if int(t / 1.2) % 2 else 0
                 p["arms"] = ["side", "wave1" if int(st * 3) % 2 else "wave2"]
         elif s == "festive":
@@ -1258,8 +1311,13 @@ class Buddy:
             self.glyph(out, spec[1], cx - gw / 2, top - 4.5 - bob, 0.5, 1)
             return
         w, h = (11, 7) if kind == "dream" else (9, 5)
-        if kind == "dream":  # grow to fit taller scenes like the Omarchy logo
+        fill = BUBBLE
+        if kind == "dream":  # grow to fit taller scenes like the Omarchy icon
             h = max(h, len(GLYPHS[self.dream]) * 0.5 + 1.5)
+        elif kind == "logo":  # the wordmark at 1/3-cell pixels, on its scheme's background
+            w = math.ceil((len(LOGO[0]) / 3 + 1.5) * 2) / 2
+            h = math.ceil((len(LOGO) / 3 + 1.5) * 2) / 2
+            fill = self.logo[0]
         bx = cx - w / 2 + self.facing * 3.5
         by = top - h - 2.5
         bx = min(GW - w - 0.5, max(0.5, bx))
@@ -1268,19 +1326,34 @@ class Buddy:
         out.append((bx + e, by - e, w - 2 * e, h + 2 * e, BUBBLE_EDGE))
         out.append((bx - e, by + e, w + 2 * e, h - 2 * e, BUBBLE_EDGE))
         out.append((bx, by, w, h, BUBBLE_EDGE))
-        out.append((bx + e, by, w - 2 * e, h, BUBBLE))
-        out.append((bx, by + e, w, h - 2 * e, BUBBLE))
+        out.append((bx + e, by, w - 2 * e, h, fill))
+        out.append((bx, by + e, w, h - 2 * e, fill))
         # tail toward his head
         tx = cx + self.facing * 1.5
-        if kind in ("think", "dream"):
+        if kind in ("think", "dream", "logo"):
             out.append((tx - 0.5, by + h + 0.5, 1, 1, BUBBLE_EDGE))
-            out.append((tx - 0.25, by + h + 0.75, 0.5, 0.5, BUBBLE))
+            out.append((tx - 0.25, by + h + 0.75, 0.5, 0.5, fill))
             out.append((tx - 0.25 + self.facing * -0.5, by + h + 2, 0.5, 0.5, BUBBLE_EDGE))
         else:
             out.append((tx - 0.5, by + h, 1, 0.5, BUBBLE))
             out.append((tx - 0.5, by + h + 0.5, 0.5, 0.5, BUBBLE_EDGE))
 
-        if kind == "dream":
+        if kind == "logo":
+            fgs = self.logo[1]
+            if self.st < 1.2:
+                for i in range(3):
+                    out.append((bx + w / 2 - 2.5 + i * 1.75, by + h / 2 - 0.5, 1, 1, fgs[0]))
+                return
+            third = 1 / 3  # snap to whole 1/3 cells so every logo pixel is the same size
+            lx = round((bx + (w - len(LOGO[0]) * third) / 2) * 3) * third
+            ly = round((by + (h - len(LOGO) * third) / 2) * 3) * third
+            n = len(LOGO[0])
+            for r, row in enumerate(LOGO):
+                for c, ch in enumerate(row):
+                    if ch == "x":
+                        out.append((lx + c * third, ly + r * third, third, third,
+                                    fgs[c * len(fgs) // n]))
+        elif kind == "dream":
             if self.st < 1.2:  # a wistful "..." before the scene appears
                 for i in range(3):
                     out.append((bx + 3.25 + i * 1.75, by + h / 2 - 0.5, 1, 1, BUBBLE_EDGE))
@@ -1333,9 +1406,13 @@ class Canvas(Gtk.Widget):
         self.set_size_request(GW * CELL, GH * CELL)
 
     def do_snapshot(self, snap):
+        s = self.get_scale_factor()  # round to device pixels, so 1/3-cell logo pixels stay even
+
+        def px(v):
+            return round(v * CELL * s) / s
+
         for x, y, w, h, c in self.buddy.render():
-            x0, y0 = round(x * CELL), round(y * CELL)
-            x1, y1 = round((x + w) * CELL), round((y + h) * CELL)
+            x0, y0, x1, y1 = px(x), px(y), px(x + w), px(y + h)
             if x1 > x0 and y1 > y0:
                 snap.append_color(c, Graphene.Rect().init(x0, y0, x1 - x0, y1 - y0))
 

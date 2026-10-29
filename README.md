@@ -16,7 +16,8 @@ doing, too.
 
 - **Keeps busy on his own.** He wanders, types on his laptop, carries crates, sweeps
   up, reads, takes coffee breaks, dances and naps (more often late at night).
-  Now and then he hops and waves at a thought bubble holding the Omarchy logo.
+  Now and then he hops and waves at a thought bubble holding the Omarchy icon or
+  the OMARCHY wordmark, in colors from Omarchy themes (including your current one).
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
   takes a calm moment. Drag him anywhere and he drops back to the floor.
 - **Follows Claude Code, loosely.** While Claude is editing he types, while it's
