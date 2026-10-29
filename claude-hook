@@ -1,0 +1,26 @@
+#!/bin/bash
+# Reports Claude Code activity to Pixel Claude.
+# Usage (from a Claude Code hook): claude-hook <EventName>, with the hook JSON on stdin.
+# Each session gets one small JSON file; the buddy polls the directory.
+dir="${XDG_RUNTIME_DIR:-/tmp}/pixel-claude"
+mkdir -p "$dir"
+IFS=$'\x1f' read -r sid tool ntype < <(jq -r '[.session_id // "unknown", .tool_name // "", .notification_type // ""] | join("\u001f")')
+sid="${sid//\//_}"
+
+case "$1" in
+  SessionEnd)       rm -f "$dir/$sid"; exit 0 ;;
+  SessionStart)     state=hello ;;
+  UserPromptSubmit) state=thinking ;;
+  PreToolUse)       state=working ;;
+  PostToolUse)      state=thinking ;;
+  Stop)             state=done ;;
+  Notification)
+    case "$ntype" in
+      permission_prompt|elicitation_dialog) state=waiting ;;
+      *) exit 0 ;;
+    esac ;;
+  *) exit 0 ;;
+esac
+
+jq -nc --arg s "$state" --arg t "$tool" --arg e "$1" '{state:$s, tool:$t, event:$e, ts:now}' > "$dir/.$sid.tmp" \
+  && mv "$dir/.$sid.tmp" "$dir/$sid"

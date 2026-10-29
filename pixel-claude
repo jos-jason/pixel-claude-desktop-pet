@@ -1,0 +1,4 @@
+#!/bin/bash
+# gtk4-layer-shell must load before libwayland-client, hence the preload.
+DIR="$(dirname "$(readlink -f "$0")")"
+LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so exec python3 "$DIR/pixel-claude.py" "$@"
