@@ -65,7 +65,7 @@ PALETTE = {
     "g": "#8A8F98", "k": "#2A1D18", "o": "#CB7B5D", "G": "#46B979",
     "D": "#2E8B57", "b": "#8A6136", "L": "#8BD17C", "C": "#6FB7E8", "s": "#B7BCC4",
     "O": "#F08A24", "Q": "#C4621A", "P": "#F7A8C4", "T": "#E0A85A", "W": "#F3F7FB",
-    "S": "#C9D3DE", "F": "#FFF2A8", "V": "#5B3A7A",
+    "S": "#C9D3DE", "F": "#FFF2A8", "V": "#5B3A7A", "M": "#90D05A",
 }
 COL = {k: rgba(v) for k, v in PALETTE.items()}
 
@@ -116,6 +116,24 @@ GLYPHS = {
         "kCwCk..kCwCk",
         "kCCCk..kCCCk",
         ".kkk....kkk.",
+    ],
+    # the Omarchy icon (/usr/share/omarchy/icon.png), one cell per stroke width
+    "omarchy": [
+        "MMMMMMMMMMMMMMM",
+        "MwwwwwwMwwwwwwM",
+        "MwMMMMMMwwwMMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MMMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMwwwwwwwwwMwM",
+        "MwMMMMMMMMMMMwM",
+        "MwwwwwwMwwwwwwM",
+        "MMMMMMMMwMMMMMM",
     ],
     "clover": [".L.L.", "LLLLL", ".LLL.", "..D..", ".D..."],
     "bat": ["V.....V", "VV.V.VV", "VVVVVVV", ".V...V."],
@@ -317,6 +335,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "coffee": (2, 4, 7),
     "daydream": (0, 7, 10),  # only when you've been at the computer a long time
     "festive": (0, 8, 12),   # only around holidays and once in a while each season
+    "omarchy": (1, 5, 7),    # a happy thought about Omarchy
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -483,6 +502,8 @@ class Buddy:
             self.facing = random.choice((-1, 1))
             self.dream = random.choice(DREAMS)  # one scene for the whole daydream
             self.last_dream = time.time()
+        elif name == "omarchy":
+            self.dream = "omarchy"  # shown in the same thought bubble as a daydream
 
     def next_activity(self):
         c = self.claude
@@ -886,6 +907,15 @@ class Buddy:
             p["arms"] = ["side", "chin"]
             p["bob"] = 0.5 if int(t / 1.6) % 2 else 0
             p["bubble"] = ("dream",)
+        elif s == "omarchy":  # a little hop, then a fond wave at the Omarchy logo
+            p["eyes"] = "happy"
+            if st < 0.6:  # the bubble waits until he lands
+                p["jump"] = 2.5 * math.sin(math.pi * st / 0.6)
+                p["arms"] = ["up", "up"]
+            else:
+                p["bubble"] = ("dream",)
+                p["bob"] = 0.5 if int(t / 1.2) % 2 else 0
+                p["arms"] = ["side", "wave1" if int(st * 3) % 2 else "wave2"]
         elif s == "festive":
             self.festive_pose(p, breathe)
         elif s == "sleep":
@@ -1228,6 +1258,8 @@ class Buddy:
             self.glyph(out, spec[1], cx - gw / 2, top - 4.5 - bob, 0.5, 1)
             return
         w, h = (11, 7) if kind == "dream" else (9, 5)
+        if kind == "dream":  # grow to fit taller scenes like the Omarchy logo
+            h = max(h, len(GLYPHS[self.dream]) * 0.5 + 1.5)
         bx = cx - w / 2 + self.facing * 3.5
         by = top - h - 2.5
         bx = min(GW - w - 0.5, max(0.5, bx))
@@ -1251,11 +1283,11 @@ class Buddy:
         if kind == "dream":
             if self.st < 1.2:  # a wistful "..." before the scene appears
                 for i in range(3):
-                    out.append((bx + 3.25 + i * 1.75, by + 3, 1, 1, BUBBLE_EDGE))
+                    out.append((bx + 3.25 + i * 1.75, by + h / 2 - 0.5, 1, 1, BUBBLE_EDGE))
             else:
                 gl = GLYPHS[self.dream]
                 self.glyph(out, self.dream, bx + w / 2 - len(gl[0]) * 0.25,
-                           by + h / 2 - len(gl) * 0.25, 0.5, 1)
+                           by + h / 2 - len(gl) * 0.25, 0.5, 1, self.dream != "omarchy")
         elif kind == "speak":
             gl = GLYPHS[spec[1]]
             self.glyph(out, spec[1], bx + w / 2 - len(gl[0]) * 0.25, by + 1.25, 0.5, 1)
@@ -1283,12 +1315,12 @@ class Buddy:
                 for i in range(n):
                     out.append((bx + 2.25 + i * 1.75, by + 2.25, 1, 1, BUBBLE_EDGE))
 
-    def glyph(self, out, name, x, y, px, alpha):
+    def glyph(self, out, name, x, y, px, alpha, outline=True):
         rows = GLYPHS[name]
         cells = [(c, r, ch) for r, row in enumerate(rows) for c, ch in enumerate(row) if ch != "."]
         edge = rgba("#2A1D18", 0.6 * alpha)
         o = 1 / CELL  # a 1-logical-px outline keeps light glyphs visible on any wallpaper
-        for c, r, _ in cells:
+        for c, r, _ in cells if outline else ():
             out.append((x + c * px - o, y + r * px - o, px + 2 * o, px + 2 * o, edge))
         for c, r, ch in cells:
             out.append((x + c * px, y + r * px, px, px, rgba(PALETTE[ch], alpha)))
@@ -1408,6 +1440,7 @@ class App(Gtk.Application):
                  ("Coffee break", lambda: self.buddy.command("coffee")),
                  ("Daydream", lambda: self.buddy.command("daydream")),
                  ("Celebrate the season", lambda: self.buddy.command("festive")),
+                 ("Omarchy love", lambda: self.buddy.command("omarchy")),
                  ("Dance", lambda: self.buddy.command("dance")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]

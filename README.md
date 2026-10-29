@@ -2,7 +2,8 @@
 
 A tiny, orange, pixel-art buddy who lives along the bottom of your screen on
 [Omarchy](https://omarchy.org) / Hyprland. He keeps himself busy: typing away,
-hauling crates, sweeping, reading, sipping coffee, dancing and napping. If you use
+hauling crates, sweeping, reading, sipping coffee, dancing, napping, and
+now and then thinking fondly about Omarchy. If you use
 [Claude Code](https://claude.com/claude-code), he loosely follows what Claude is
 doing, too.
 
@@ -15,6 +16,7 @@ doing, too.
 
 - **Keeps busy on his own.** He wanders, types on his laptop, carries crates, sweeps
   up, reads, takes coffee breaks, dances and naps (more often late at night).
+  Now and then he hops and waves at a thought bubble holding the Omarchy logo.
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
   takes a calm moment. Drag him anywhere and he drops back to the floor.
 - **Follows Claude Code, loosely.** While Claude is editing he types, while it's
