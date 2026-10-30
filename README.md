@@ -18,7 +18,8 @@ doing, too.
   up, reads, takes coffee breaks, dances and naps (more often late at night).
   He also does four acts from Claude's own mascot clips: exploring (leaning to look
   around, then leaping across the floor), waving a flag, stomping and throwing
-  confetti, and a gym session with a sweatband and dumbbell curls.
+  confetti, and a gym session with a sweatband and dumbbell curls. Sometimes he
+  just sways, rosy-cheeked and smiling, looking happy and content.
   Now and then he hops and waves at a thought bubble holding the Omarchy icon or
   the OMARCHY wordmark, in colors from Omarchy themes (including your current one).
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
