@@ -368,15 +368,12 @@ def _flag_frame(x0, width, droop, ph):
         offs = [round(droop * d) for d in dist]
     else:
         offs = [round(2.5 * d / 11 * math.sin(d / 11 * 1.5 * math.pi - ph)) for d in dist]
-    by_d = dict(zip(dist, offs))
     mid = max(dist) // 2
     grid = [["."] * width for _ in range(H + 2 + max(offs))]
     for c, (d, off) in enumerate(zip(dist, offs)):
-        shade = "S" if d and off > by_d[d - 1] else "w"
-        for r in range(H):
-            emblem = (width >= 9 and 0 <= r - 1 < 5 and 0 <= d - mid + 2 < 5
-                      and STAR[r - 1][d - mid + 2] == "o")
-            grid[r + off + 2][c] = "o" if emblem else shade
+        for r in range(H):  # the spark shows whichever way the cloth is blowing
+            emblem = 0 <= r - 1 < 5 and 0 <= d - mid + 2 < 5 and STAR[r - 1][d - mid + 2] == "o"
+            grid[r + off + 2][c] = "o" if emblem else "w"
     return x0, ["".join(row) for row in grid]
 
 
