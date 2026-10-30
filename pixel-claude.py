@@ -61,7 +61,6 @@ PAGE = rgba("#FBF6EC")
 INK = rgba("#B9B0A4")
 MUG = rgba("#F2EEE8")
 COFFEE = rgba("#5A3A28")
-BLUSH = rgba("#F7A8C4", 0.8)
 
 PALETTE = {
     "w": "#FFFFFF", "r": "#E5484D", "R": "#FF8A8E", "y": "#FFD34D",
@@ -546,7 +545,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "flag": (1, 5, 8),
     "stomp": (1, 3, 5),
     "gym": (1.5, 0, 0),      # fixed length: GYM_DUR
-    "content": (2, 5, 9),    # rosy cheeks, a gentle sway, all is well
+    "content": (2, 5, 9),    # smiling, a gentle sway, all is well
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -1003,9 +1002,6 @@ class Buddy:
         elif s == "petted" and 1.2 < self.st < self.chill_at and self.mark > 0.9:
             self.mark = 0
             self.spawn("heart", random.uniform(-2, 2), -10, 0, -2, 1.2)
-        elif s == "content" and self.mark > 2.6:
-            self.mark = 0
-            self.spawn("heart", random.uniform(-2, 2), -10, random.uniform(-0.3, 0.3), -1.5, 1.6)
         elif s == "coffee" and self.mark > 0.45:
             self.mark = 0
             self.spawn("steam", self.facing * random.uniform(5.5, 7.5), -7.5,
@@ -1113,7 +1109,7 @@ class Buddy:
         s, st, t = self.state, self.st, self.t
         p = {"bob": 0, "legs": [0, 0, 0, 0], "leg_h": 1.5, "arms": ["side", "side"],
              "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0, "lean": 0,
-             "tilt": 0, "blush": False,
+             "tilt": 0,
              "front": [], "bubble": None, "over": [], "grip": [], "hat": None, "glasses": False}
         breathe = 0.5 if int(t / 1.1) % 2 else 0
         if s == "idle":
@@ -1232,7 +1228,6 @@ class Buddy:
             p["lean"] = 0.25 * math.sin(st * math.pi / 1.4)
             p["bob"] = 0.5 if int(t / 1.6) % 2 else 0
             p["arm_dy"] = [p["bob"], p["bob"]]
-            p["blush"] = True
         elif s == "sleep":
             p["leg_h"] = 0.5
             p["eyes"] = "closed"
@@ -1523,9 +1518,6 @@ class Buddy:
                 B(x - 0.25, 1.0, 0.5, 0.5, EYE)
                 B(x + 0.25, 0.5, 0.5, 0.5, EYE)
                 B(x + 0.75, 1.0, 0.5, 0.5, EYE)
-        if p["blush"]:  # rosy cheeks, just below and outside the eyes
-            for x in (-3.75, 2.25):
-                B(x, 2.25, 1.5, 0.5, BLUSH)
         if p["glasses"]:
             self.sprite(B, SPRITES["glasses"], -4, 0.5)
         if p["hat"] == "ears":
