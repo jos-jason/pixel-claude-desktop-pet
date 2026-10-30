@@ -460,10 +460,26 @@ for _i, _f in enumerate(GYM_SEQ):
     GYM_STARTS.append(GYM_STARTS[-1] + _gym_hold(_i, _f))
 GYM_DUR = GYM_STARTS.pop()
 
-# sidetype: the side-on laptop GIF, 100ms frames: 11 to bring the laptop out, a 16-frame typing
-# loop (1 = a key press), 6 to pack it away.
+# sidetype: the side-on laptop GIF, frame by frame at 100ms: 11 frames to produce the laptop,
+# a 16-frame typing loop, 6 to pack it away. Arm rects are (x, y, w, h), +x toward his front.
 SIDETYPE_FRAME = 0.1
-SIDETYPE_TAPS = "0100101000100100"
+SIDETYPE_TAPS = "2021010210102102"  # paw while typing: 0 up, 1 halfway, 2 down on the keys
+_BACK, _FRONT = (-6, 2, 2, 2), (4, 2, 2, 2)
+SIDETYPE_IN = [  # (bob, eye drop, eyes, arm rects, laptop)
+    (0, 0, "open", [_BACK, _FRONT], None),
+    *[(0.5, 1.25, "wink", [(-6, 1, 2, 2), (4, 3, 1.5, 2)], None)] * 5,  # a wink, reaching round
+    *[(0, 0, "open", [(-6, 2.5, 2, 2), (4, -0.5, 1.5, 1.5)], "held")] * 2,  # ta-da, held up high
+    (0, 0.75, "open", [_BACK, (4, 2.5, 1.5, 1.5)], "swing"),
+    (0, 0.75, "open", [(-6, 2.5, 2, 2), (4, 4.5, 2, 2)], "open"),        # set on the floor
+    (0, 0.75, "open", [(-6, 1.5, 2, 2), (4, 2, 1.5, 1.5)], "opening"),
+]
+SIDETYPE_OUT = [
+    None,                                                              # side-on, lifting the lid
+    (0, 0.75, "open", [(-7, 2.5, 3, 2), (4, 2.5, 2, 2.5)], "tucked"),  # under his arm
+    *[(0.5, 1.25, "open", [(-6.5, 1, 2.5, 2), (4, 3.5, 1, 2)], None)] * 2,  # tucked away
+    (0, 0, "open", [(-6, 2.5, 2, 2), (4, 2.5, 2, 2)], None),
+    (0, 0, "open", [_BACK, _FRONT], None),
+]
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -1118,7 +1134,7 @@ class Buddy:
         s, st, t = self.state, self.st, self.t
         p = {"bob": 0, "legs": [0, 0, 0, 0], "leg_h": 1.5, "arms": ["side", "side"],
              "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0, "lean": 0,
-             "tilt": 0, "side": False,
+             "tilt": 0, "side": None,
              "front": [], "bubble": None, "over": [], "grip": [], "hat": None, "glasses": False}
         breathe = 0.5 if int(t / 1.1) % 2 else 0
         if s == "idle":
@@ -1316,39 +1332,31 @@ class Buddy:
                     p["arm_dy"] = [1, 1] if j < 0.85 else [p["bob"], p["bob"]]
 
     def sidetype_pose(self, p):
-        """Pull a laptop out of thin air, set it down, turn side-on and type; then pack up."""
+        """Pull out a laptop, set it on the floor, turn side-on and type; then pack it away."""
         f = int(self.st / SIDETYPE_FRAME)
         left = int((self.dur - self.st) / SIDETYPE_FRAME)
-        if f < 11:
-            if 1 <= f <= 5:  # a wink while reaching round the back
-                p["eyes"], p["arms"] = "wink", ["side", "tuck"]
-            elif f in (6, 7):  # ta-da: up it comes, held by a corner
-                p["arms"] = ["side", "nub"]
-                p["front"].append(lambda B, g: (B(3.75, -3.5, 0.5, 2.5, LID), B(3.75, -3.5, 1.5, 0.5, LID)))
-            elif f == 8:  # swung down in front
-                p["arms"] = ["side", "type"]
-                p["front"].append(lambda B, g: B(5.5, 2.25, 2.5, 1.25, LID))
-            elif f >= 9:  # set on the floor, lid coming up
-                p["front"].append(lambda B, g: self.draw_side_laptop(B, g, False))
+        p["arms"] = ["none", "none"]  # every frame draws its own
+        if f < len(SIDETYPE_IN):
+            frame = SIDETYPE_IN[f]
+        elif left < len(SIDETYPE_OUT):
+            frame = SIDETYPE_OUT[len(SIDETYPE_OUT) - 1 - left]
+        else:  # side-on, typing
+            p["side"] = int(SIDETYPE_TAPS[(f - len(SIDETYPE_IN)) % len(SIDETYPE_TAPS)])
+            p["edy"] = 1.75
+            if f == len(SIDETYPE_IN):  # wide-eyed as he settles in
+                p["eyes"], p["edy"] = "wide", 1.5
+            p["front"].append(lambda B, g: self.draw_floor_laptop(B, g, "open"))
+            if self.claude.busy:
+                p["bubble"] = ("code",)
             return
-        if left < 6:
-            k = 5 - left
-            if k == 0:  # lid down
-                p["side"], p["bob"], p["arms"] = True, 0.5, ["none", "key"]
-                p["front"].append(lambda B, g: self.draw_side_laptop(B, g, False))
-            elif k == 1:  # tucked under his arm
-                p["arms"] = ["side", "type"]
-                p["front"].append(lambda B, g: B(4.5, 3, 2.5, 1, LID))
-            elif k == 2:  # and tucked away again
-                p["eyes"], p["arms"] = "wink", ["side", "tuck"]
+        if frame is None:
+            p["side"], p["eyes"], p["edy"] = "lift", "wide", 1.5
+            p["front"].append(lambda B, g: self.draw_floor_laptop(B, g, "lifting"))
             return
-        tap = SIDETYPE_TAPS[(f - 11) % len(SIDETYPE_TAPS)] == "1"
-        p["side"], p["bob"] = True, 0.5
-        p["arms"] = ["none", "tap" if tap else "key"]
-        p["edy"] = 0.25
-        p["front"].append(lambda B, g: self.draw_side_laptop(B, g, True))
-        if self.claude.busy:
-            p["bubble"] = ("code",)
+        p["bob"], p["edy"], p["eyes"], arms, laptop = frame
+        p["over"].append(lambda B, g: [B(*r, BODY) for r in arms])
+        if laptop:
+            p["front"].append(lambda B, g: self.draw_floor_laptop(B, g, laptop))
 
     def festive_pose(self, p, breathe):
         v, st, t, dur = self.fest, self.st, self.t, self.dur
@@ -1503,7 +1511,7 @@ class Buddy:
             out.append((GW / 2 - sw / 2, GROUND, sw, 0.5, SHADOW))
 
         # legs, torso, arms
-        for i, lx in enumerate((-3, -1.5, 0.5, 2) if p["side"] else (-4, -2, 1, 3)):
+        for i, lx in enumerate(() if p["side"] is not None else (-4, -2, 1, 3)):
             hip = 6 + (rise(lx + 0.5) if p["tilt"] else 0)
             h = g - hip - p["legs"][i]
             if h > 0 and p["lean"]:  # slant from the leaning hips down to planted feet
@@ -1514,9 +1522,8 @@ class Buddy:
         if p["tilt"]:  # a stepped slope, one column at a time
             for c in range(8):
                 B(-4 + c, 0, 1, 6, BODY)
-        elif p["side"]:  # side-on: narrower, with his far side in shade
-            B(-3, 0, 6, 6, BODY)
-            B(-3, 0, 1, 6, BODY_D)
+        elif p["side"] is not None:
+            self.draw_side_body(B, g, p["side"])
         else:
             B(-4, 0, 8, 6, BODY)
         for side, mode, dy in ((-1, p["arms"][0], p["arm_dy"][0]), (1, p["arms"][1], p["arm_dy"][1])):
@@ -1528,13 +1535,6 @@ class Buddy:
                 A(side, 2.5, -1.5 if mode == "nub" else -2.5, 1.5, 1.5 if mode == "nub" else 2.5)
             elif mode == "low":
                 A(side, 4, 3, 2, 1.5)
-            elif mode == "tuck":
-                A(side, 4, 2.5, 1, 1.5)
-            elif mode == "key":  # side-on, hand poised over the keys
-                A(side, 3, 2.5, 1.5, 2)
-            elif mode == "tap":
-                A(side, 3, 3, 1.5, 2)
-                A(side, 3.5, 4.5, 1, g - 5)
             elif mode == "mid":
                 A(side, 4, 0.5, 1.5, 3)
             elif mode == "vee":
@@ -1562,7 +1562,7 @@ class Buddy:
 
         # eyes
         ex, ey = p["edx"], p["edy"]
-        for x in ((-1, 1.5) if p["side"] else (-3, 2)):
+        for x in ((0, 4) if p["side"] is not None else (-3, 2)):
             e = p["eyes"]
             if e == "wink":  # the far eye shut
                 e = "closed" if x < 0 else "open"
@@ -1613,12 +1613,47 @@ class Buddy:
                 self.glyph(out, pt.kind, lx, pt.y, pt.size, fade)
         return out
 
-    def draw_side_laptop(self, B, g, opened):
-        """The laptop on the floor in front of him, seen side-on, lid open to some angle."""
-        B(4.5, g - 0.5, 3, 0.5, LAPTOP_BASE)
-        dx, dy = (0.3, 0.5) if opened else (0.5, 0.15)
-        for i in range(6):
-            B(7.25 + i * dx, g - 1 - i * dy, 0.5, 0.5 + dy, LID)
+    def draw_side_body(self, B, g, paw):
+        """Turned three-quarters toward his front: the far side in shade, eyes low and forward,
+        stubby legs with their feet pointing back, and a front paw (0 up, 1 halfway, 2 down)."""
+        for lx in (-3, -1, 2, 4):
+            B(lx, 6, 1, g - 6, BODY)
+            B(lx - 0.5, g - 0.5, 0.5, 0.5, BODY)
+        B(-3, 1, 8, 5, BODY)
+        B(-3, 1, 2, 5, BODY_D)
+        if paw == 2:  # pressed down onto the keys
+            B(5, 3.5, 1.5, 2, BODY)
+            B(5, 5.5, 2, 0.5, BODY_D)
+            B(5, 6, 2, g - 6.5, BODY_D)
+        elif paw == 1:
+            B(5, 3.5, 1.5, 2, BODY)
+            B(5, 5.25, 2, 0.25, BODY_D)
+            B(5, 5.5, 2, 1.25, BODY)
+        else:
+            B(5, 3.5, 1.5, 1.5, BODY)
+            B(5, 5, 2, 1.5 if paw == 0 else 1, BODY)
+
+    def draw_floor_laptop(self, B, g, kind):
+        """The grey laptop from the GIF: held up, swung down, on the floor, or tucked away."""
+        grey = COL["g"]
+        if kind == "held":  # open flat on his raised hand, screen straight up
+            B(4.5, -1, 3, 0.5, grey)
+            B(7, -3.5, 0.5, 2.5, grey)
+        elif kind == "swing":  # shut, swinging down
+            for y, a, b in ((1.5, 8, 10), (2, 7, 11), (2.5, 6, 11), (3, 6, 10), (3.5, 1, 9), (4, 1, 7)):
+                B(5 + a * 0.5, y, (b - a) * 0.5, 0.5, grey)
+        elif kind == "tucked":
+            for i in range(5):
+                B(5.5 + 0.5 * i, 2.5 + 0.5 * i, 0.5, 0.5, grey)
+            B(5.5, 5, 2.5, 0.5, grey)
+        elif kind == "lifting":  # shut and tipped up off the floor
+            for i in range(6):
+                B(6.5 + 0.5 * i, 5.5 - 0.5 * i, 1, 0.5, grey)
+        else:  # on the floor, lid open ("open") or still coming up ("opening")
+            B(5.5, g - 0.5, 2.5, 0.5, grey)
+            steps, dx = (5, 0.5) if kind == "open" else (3, 1)
+            for i in range(steps):
+                B(8 + i * dx, g - 1 - 0.5 * i, 1, 0.5, grey)
 
     def draw_laptop(self, B, g):
         B(-3.5, g - 3.5, 7, 3, LID)
