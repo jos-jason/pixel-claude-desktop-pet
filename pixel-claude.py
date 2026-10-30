@@ -479,6 +479,23 @@ SIDETYPE_OUT = [
     (0, 0, "open", [_BACK, _FRONT], None),
 ]
 
+# sparkler: the sparkler GIF (held up fizzing 1.3s, a swing, 0.5s pointed forward), then he
+# waves it overhead leaving a glowing trail, writes a heart in the air, and holds it up again.
+SPARK_GOLD = ["#EBC264", "#F7E6A6", "#E0A84A"]
+SPARK_LOOP = 1.9
+SPARK_WAVE_END = SPARK_LOOP + 2.4
+SPARK_HEART_END = SPARK_WAVE_END + 1.6
+SPARK_HOLD_END = SPARK_HEART_END + 0.8
+SPARK_DUR = SPARK_HOLD_END + 1.3
+
+
+def heart_point(u):
+    """A point on a heart traced in the air above and in front of him, u in [0, 2pi)."""
+    x = 16 * math.sin(u) ** 3
+    y = 13 * math.cos(u) - 5 * math.cos(2 * u) - 2 * math.cos(3 * u) - math.cos(4 * u)
+    return 3.5 + 0.13 * x, -6.75 - 0.13 * y
+
+
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
 HOLIDAY_DAY_EVERY = 6 * 60    # and more often on the day itself
@@ -567,6 +584,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "gym": (1.5, 0, 0),      # fixed length: GYM_DUR
     "content": (2, 5, 9),    # smiling, a gentle sway, all is well
     "sidetype": (2, 5, 9),   # pulls out a laptop, turns side-on and types
+    "sparkler": (1, 0, 0),   # fixed length: SPARK_DUR
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -729,6 +747,8 @@ class Buddy:
             self.facing = self.ex_dir
         elif name == "gym":
             self.dur = GYM_DUR
+        elif name == "sparkler":
+            self.dur = SPARK_DUR
         elif name in ("walk", "carry"):
             span = self.screen_w * random.uniform(0.15, 0.45)
             self.target = min(self.max_x, max(0, self.x + random.choice((-1, 1)) * span))
@@ -992,6 +1012,12 @@ class Buddy:
             elif fr in (0, 4) and self.frame_k:
                 self.puff(2)
 
+        if s == "sparkler":
+            phase, _, (tx, ty) = self.sparkler_at(self.st)
+            if phase in ("wave", "heart"):  # the glowing trail it leaves in the air
+                self.spawn("dot", self.facing * tx, ty - 7.5, 0, 0, 0.5 if phase == "wave" else 2.4,
+                           0.5, random.choice(SPARK_GOLD))
+
         if s == "gym":
             i = bisect.bisect_right(GYM_STARTS, self.st) - 1
             if self.advanced(i):
@@ -1248,6 +1274,8 @@ class Buddy:
             p["over"].append(lambda B, g: self.draw_gym(B, arms, band, bells))
         elif s == "sidetype":
             self.sidetype_pose(p)
+        elif s == "sparkler":
+            self.sparkler_pose(p)
         elif s == "content":  # eyes smiling shut now and then, swaying to a slow tune
             p["eyes"] = "closed" if (st % 4.5) > 3.2 else "happy"
             p["lean"] = 0.25 * math.sin(st * math.pi / 1.4)
@@ -1328,6 +1356,64 @@ class Buddy:
                 else:  # land with a squash, the hands overshooting down then settling
                     p["bob"] = 1 - tween(j, 0.8, 0.2, ease_out)
                     p["arm_dy"] = [1, 1] if j < 0.85 else [p["bob"], p["bob"]]
+
+    def sparkler_at(self, st):
+        """(phase, hand, tip) of the sparkler at time st; points from the top of his head."""
+        if st < SPARK_LOOP or st >= SPARK_HOLD_END:
+            t = st if st < SPARK_LOOP else 0
+            if t < 1.3:
+                return "up", (2.25, -1.75), (2.25, -4.25)
+            if t < 1.4:
+                return "swing", (5.5, -0.5), (7.75, -2.5)
+            return "forward", (6, 3.75), (8.25, 3.75)
+        if st < SPARK_WAVE_END:  # big arcs from side to side overhead
+            a = 0.9 * math.sin(2 * math.pi * (st - SPARK_LOOP) / 0.8)
+            return "wave", (2.25, -1.75), (2.25 + 2.5 * math.sin(a), -1.75 - 2.5 * math.cos(a))
+        if st < SPARK_HEART_END:
+            tx, ty = heart_point(math.pi * (1 + 2 * (st - SPARK_WAVE_END) / (SPARK_HEART_END - SPARK_WAVE_END)))
+        else:  # from its point and back round, so the stick ends up under the heart
+            tx, ty = heart_point(math.pi)
+        dx, dy = tx - 2.5, ty - 1  # the stick keeps its length, leaning out from low in his body
+        d = math.hypot(dx, dy)
+        return "heart" if st < SPARK_HEART_END else "hold", (tx - 2.5 * dx / d, ty - 2.5 * dy / d), (tx, ty)
+
+    def sparkler_pose(self, p):
+        phase, (hx, hy), tip = self.sparkler_at(self.st)
+        p["arms"] = ["side", "none"]
+        p["eyes"] = "happy"
+        if phase == "forward":  # arm out level, eyes open, watching the sparks
+            p["eyes"], p["edx"] = "open", 0.75
+            p["over"].append(lambda B, g: B(4, 3, 2, 2, BODY))
+        elif phase == "swing":
+            p["over"].append(lambda B, g: (B(0, -0.5, 4, 0.5, BODY), B(3.5, -2, 2, 2, BODY)))
+        elif phase in ("heart", "hold"):  # his raised corner stretches to follow the writing
+            if phase == "heart":
+                p["eyes"], p["edx"], p["edy"] = "open", 0.5, -0.25
+            n = 4
+            p["over"].append(lambda B, g: [B(0, -0.5, 4, 0.5, BODY)] + [
+                B(2.5 + (hx - 3.25) * k / n, -1.5 + (hy + 0.75) * k / n, 1.5, 1.5, BODY)
+                for k in range(n + 1)])
+        else:  # held up by his raised front corner, shoulder lifted
+            p["over"].append(lambda B, g: (B(0, -0.5, 4, 0.5, BODY), B(1.5, -2, 2, 1.5, BODY)))
+        fizz = 0.5 if phase in ("heart", "hold") else 1.0  # keep the writing readable
+        p["front"].append(lambda B, g: self.draw_sparkler_stick(B, (hx, hy), tip, phase == "forward", fizz))
+
+    def draw_sparkler_stick(self, B, hand, tip, forward, fizz=1.0):
+        """A black stick from his hand to the tip, and a fresh fizz of gold every 100ms."""
+        (x0, y0), (x1, y1) = hand, tip
+        n = max(1, int(math.hypot(x1 - x0, y1 - y0) / 0.4))
+        for i in range(n + 1):
+            B(x0 + (x1 - x0) * i / n - 0.25, y0 + (y1 - y0) * i / n - 0.25, 0.5, 0.5, EYE)
+        frame = int(self.t / 0.1)
+        rng = random.Random(frame)
+        burst = 1.6 if frame % 7 == 0 else 1.0
+        for _ in range(round((12 if burst > 1 else 8) * fizz)):
+            if forward:  # spraying out ahead and dropping
+                dx, dy = rng.uniform(0, 2.5), rng.uniform(-1.5, 2.5)
+            else:
+                dx, dy = rng.uniform(-1.75, 1.75) * burst * fizz, rng.uniform(-2, 1) * burst * fizz
+            x, y = round((x1 + dx) * 2) / 2, round((y1 + dy) * 2) / 2
+            B(x - 0.25, y - 0.25, 0.5, 0.5, rgba(rng.choice(SPARK_GOLD)))
 
     def sidetype_pose(self, p):
         """Pull out a laptop, set it on the floor, turn side-on and type; then pack it away."""
@@ -1960,6 +2046,7 @@ class App(Gtk.Application):
                  ("Hit the gym", lambda: self.buddy.command("gym")),
                  ("Happy & content", lambda: self.buddy.command("content")),
                  ("Laptop on the floor", lambda: self.buddy.command("sidetype")),
+                 ("Sparkler", lambda: self.buddy.command("sparkler")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
         self.menu = Gtk.Popover(has_arrow=False)

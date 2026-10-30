@@ -22,6 +22,8 @@ doing, too.
   just sways and smiles, looking happy and content.
   And now and then he pulls a laptop out of thin air, sets it on the floor and
   types away side-on.
+  He also has a sparkler: he holds it up fizzing, points it out, waves it
+  overhead in glowing arcs and writes a heart in the air.
   Now and then he hops and waves at a thought bubble holding the Omarchy icon or
   the OMARCHY wordmark, in colors from Omarchy themes (including your current one).
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
