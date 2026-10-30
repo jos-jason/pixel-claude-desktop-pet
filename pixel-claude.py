@@ -435,10 +435,10 @@ GYM_FRAMES = [
 ]
 GYM_SEQ = list(range(25)) + list(range(13, 25)) + list(range(25, 36))
 BAND = {  # loose sweatband: (rows, x, y), held by the back hand or stretched over his head
-    "low": ([".NNNN.", "NwwwwN", ".NNNN."], -7.5, 4.5),
-    "mid": ([".NNNN.", "NwwwwN", ".NNNN."], -7.5, 1.5),
-    "up": ([".NNNN.", "NwwwwN", ".NNNN."], -4.75, -3),
-    "stretch": (["..NNNNNNNNNNNN..", ".NwwwwwwwwwwwwN.", "NNNNNNNNNNNNNNNN"], -4, -1.5),
+    "low": ([".NNNN.", "N....N", ".NNNN."], -7.5, 4.5),
+    "mid": ([".NNNN.", "N....N", ".NNNN."], -7.5, 1.5),
+    "up": ([".NNNN.", "N....N", ".NNNN."], -4.75, -3),
+    "stretch": (["..NNNNNNNNNNNN..", ".N............N.", "NNNNNNNNNNNNNNNN"], -4, -1.5),
 }
 BELL = [".kk.", "kkkk", "kkkk", ".kk."]
 BELLS = {  # a dumbbell in the front hand for each arm mode: (rows, x, y)
@@ -1575,11 +1575,10 @@ class Buddy:
 
     def draw_gym(self, B, arms, band, bells):
         if band == "on":  # sweatband across his forehead
-            B(-4, 0, 8, 0.25, COL["w"])
             B(-4, 0.25, 8, 0.5, COL["N"])
         elif band:
             rows, x, y = BAND[band]
-            self.sprite(B, rows, x, y, outline=True)
+            self.sprite(B, rows, x, y)
         if bells:
             for side, mode in zip((-1, 1), arms):
                 rows, x, y = BELLS[mode]
