@@ -16,14 +16,18 @@ doing, too.
 
 - **Keeps busy on his own.** He wanders, types on his laptop, carries crates, sweeps
   up, reads, takes coffee breaks, dances and naps (more often late at night).
+  He also does four acts from Claude's own mascot clips: exploring (leaning to look
+  around, then leaping across the floor), waving a flag, stomping and throwing
+  confetti, and a gym session with a sweatband and dumbbell curls.
   Now and then he hops and waves at a thought bubble holding the Omarchy icon or
   the OMARCHY wordmark, in colors from Omarchy themes (including your current one).
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
   takes a calm moment. Drag him anywhere and he drops back to the floor.
 - **Follows Claude Code, loosely.** While Claude is editing he types, while it's
   reading or searching he reads, and while it runs commands he types or hauls
-  crates. When Claude is thinking, he thinks. When it finishes, he celebrates. If it
-  needs your permission or an answer, he waves at you with a question mark. He
+  crates. When Claude is thinking, he thinks. When it finishes, he celebrates
+  (sometimes with a confetti stomp). If it needs your permission or an answer, he
+  waves at you, or waves a flag, with a question mark. He
   still takes the odd break, so he's never a strict mirror.
 - **Reminds you to get outside.** After about an hour of nonstop computer use, he
   sometimes daydreams about trees, mountain trails or birdwatching.
@@ -115,3 +119,8 @@ files it edits).
 ## License
 
 [MIT](LICENSE)
+
+The explore, flag, confetti and gym acts follow the timings in Ayotomiwa
+Wale-Durojaye's frame-by-frame breakdown,
+[Reverse-Engineering Claude AI's Mascot Animations with SVG and GSAP](https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/)
+(Codrops), redrawn here at this pet's pixel scale.

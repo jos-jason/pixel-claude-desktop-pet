@@ -7,6 +7,7 @@ Launching the app again while he's running sends him off to bed (quits).
 He loosely follows what Claude Code is doing: the claude-hook script (run from
 Claude Code hooks) leaves one status file per session in $XDG_RUNTIME_DIR/pixel-claude.
 """
+import bisect
 import datetime
 import json
 import math
@@ -66,7 +67,7 @@ PALETTE = {
     "g": "#8A8F98", "k": "#2A1D18", "o": "#CB7B5D", "G": "#46B979",
     "D": "#2E8B57", "b": "#8A6136", "L": "#8BD17C", "C": "#6FB7E8", "s": "#B7BCC4",
     "O": "#F08A24", "Q": "#C4621A", "P": "#F7A8C4", "T": "#E0A85A", "W": "#F3F7FB",
-    "S": "#C9D3DE", "F": "#FFF2A8", "V": "#5B3A7A", "M": "#90D05A",
+    "S": "#C9D3DE", "F": "#FFF2A8", "V": "#5B3A7A", "M": "#90D05A", "N": "#3B4F8C",
 }
 COL = {k: rgba(v) for k, v in PALETTE.items()}
 
@@ -302,6 +303,162 @@ FIREWORKS = {"newyear": ["#FFD34D", "#FF8A8E", "#6FB7E8", "#8BD17C", "#FFFFFF"],
              "fireworks": ["#E5484D", "#FFFFFF", "#6FB7E8"]}
 LEAVES = ["#F08A24", "#D9534F", "#F2C14E", "#C4621A"]
 
+# The four acts from Claude's own mascot clips (explore, flag, stomp, gym), with timings
+# from Ayotomiwa Wale-Durojaye's frame-by-frame GSAP rebuild of them (Codrops, May 2026).
+
+
+def ease_out(k):     # GSAP power2.out
+    return 1 - (1 - k) ** 3
+
+
+def ease_in(k):      # power3.in
+    return k ** 4
+
+
+def ease_inout(k):   # power1.inOut
+    return 2 * k * k if k < 0.5 else 1 - (2 - 2 * k) ** 2 / 2
+
+
+def sine_out(k):
+    return math.sin(k * math.pi / 2)
+
+
+def tween(t, t0, dur, ease=None):
+    """Progress 0..1 through [t0, t0 + dur], optionally eased."""
+    k = min(1.0, max(0.0, (t - t0) / dur))
+    return ease(k) if ease else k
+
+
+# explore: lean back to look, lean ahead, leap, walk on, peer down, turn and leap back
+LOOK_BACK, LOOK_AHEAD, UPRIGHT = 0.0, 1.0, 2.0
+CROUCHES = (2.3, 5.8)  # a 0.1s crouch, then the leap
+WALK_ON, PEER = 3.45, 5.0
+EXPLORE_DUR = 7.8
+LEAP_PX, LEAP_H, WALK_PX = 110, 7.0, 56
+
+
+def leap_height(j):
+    """Height in cells j seconds into a leap: sine.out up, a hang, power3.in down."""
+    if j < 0.6:
+        return LEAP_H * tween(j, 0, 0.42, sine_out)
+    return LEAP_H * (1 - tween(j, 0.6, 0.2, ease_in))
+
+
+# flag: 12 frames; the first 3 raise the limp flag, then 3-11 loop as it whips around the pole.
+FLAG_FRAME = 0.1
+HAND_PULL = [0, -0.25, -0.75, -0.75, -0.5, 0, 0, 0, -0.25, -0.5, -1, -1]  # hand meets the cloth
+SWAY = [0, 0, -0.5, -0.5, 0, 0.5, 0.5, 0.5, 0, 0, -0.5, -0.5]           # body leans against it
+BACK_DROP = [0, 0, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0.5, 0.5]                 # other hand dips
+FLAG_SHAPES = [  # (first column from the pole, width, droop, wave phase), in half-cell pixels
+    (0, 6, 1.0, None), (0, 9, 0.6, None), (0, 12, 0, 0.0),
+    (-1, 6, 0.3, None),                                  # wrapping round the front of the pole
+    (-9, 9, 0.6, None), (-12, 12, 0, 2.1), (-12, 12, 0, 4.2), (-6, 6, 0.3, None),
+    (-2, 4, 1.2, None),                                  # wound round the pole
+    (0, 6, 1.0, None), (0, 9, 0.7, None), (0, 12, 0, 1.0),
+]
+STAR = ["o.o.o", ".ooo.", "ooooo", ".ooo.", "o.o.o"]  # a Claude-ish spark on the cloth
+
+
+def _flag_frame(x0, width, droop, ph):
+    """(x0, cloth rows), with 2 spare rows on top for the wave's crests."""
+    H = 7
+    dist = [x if x >= 0 else -x - 1 for x in range(x0, x0 + width)]  # columns out from the pole
+    if ph is None:
+        offs = [round(droop * d) for d in dist]
+    else:
+        offs = [round(2.5 * d / 11 * math.sin(d / 11 * 1.5 * math.pi - ph)) for d in dist]
+    by_d = dict(zip(dist, offs))
+    mid = max(dist) // 2
+    grid = [["."] * width for _ in range(H + 2 + max(offs))]
+    for c, (d, off) in enumerate(zip(dist, offs)):
+        shade = "S" if d and off > by_d[d - 1] else "w"
+        for r in range(H):
+            emblem = (width >= 9 and 0 <= r - 1 < 5 and 0 <= d - mid + 2 < 5
+                      and STAR[r - 1][d - mid + 2] == "o")
+            grid[r + off + 2][c] = "o" if emblem else shade
+    return x0, ["".join(row) for row in grid]
+
+
+FLAG_FRAMES = [_flag_frame(*f) for f in FLAG_SHAPES]
+
+# stomp: 8 frames at 125ms of (tilt, bob, arms): crouch, then tip up onto one side with that
+# corner thrown up as a hand, and the same the other way. Confetti leaves the raised corner.
+STOMP_FRAME = 0.125
+STOMP = [
+    (0, 1, ["side", "side"]), (1, -0.5, ["side", "nub"]), (1.5, -1, ["side", "nub2"]),
+    (1, -0.5, ["side", "nub"]), (0, 1, ["side", "side"]), (-1, -0.5, ["nub", "side"]),
+    (-1.5, -1, ["nub2", "side"]), (-1, -0.5, ["nub", "side"]),
+]
+CONFETTI = ["#D97757", "#C46A8A", "#7A9FD4"]
+CONFETTI_BITS = [[(0, 0)], [(0, 0), (0.5, 0)], [(0, 0), (0, 0.5)], [(0, 0), (0.5, 0.5)],
+                 [(0, 0.5), (0.5, 0)]]
+
+# gym: 36 frames of (bob, tilt, arms, sweatband, dumbbells in hand, eyes). Sweatband on, a
+# stretch, alternating one-arm curls (frames 13-24 play twice), then the band comes off.
+GYM_FRAMES = [
+    (0, 0, ("side", "side"), None, False, "open"),
+    (0, 0, ("low", "side"), None, False, "open"),
+    (0, 0, ("low", "side"), "low", False, "open"),        # picks up the band
+    (0, 0, ("side", "side"), "mid", False, "open"),
+    (0, 0, ("nub", "side"), "up", False, "open"),
+    (0, 0, ("nub", "nub"), "stretch", False, "open"),
+    (0, 0, ("nub", "nub"), "on", False, "closed"),        # 6-7: snug it down
+    (0, 0, ("nub", "nub"), "on", False, "closed"),
+    (0, 0, ("nub", "nub"), "on", False, "open"),
+    (0, 0, ("vee", "vee"), "on", False, "open"),
+    (0, 0, ("vee", "vee"), "on", False, "happy"),
+    (0, 0, ("side", "side"), "on", False, "wide"),
+    (1, 0, ("low", "low"), "on", True, "open"),           # dumbbells in hand
+    (0.5, 0.5, ("low", "mid"), "on", True, "open"),
+    (0, 1, ("low", "nub"), "on", True, "closed"),
+    (0, 1, ("low", "nub"), "on", True, "happy"),          # 15: held up
+    (0, 1, ("low", "nub"), "on", True, "open"),
+    (0.5, 0.5, ("low", "mid"), "on", True, "open"),
+    (1, 0, ("low", "low"), "on", True, "open"),
+    (0.5, -0.5, ("mid", "low"), "on", True, "open"),
+    (0, -1, ("nub", "low"), "on", True, "closed"),
+    (0, -1, ("nub", "low"), "on", True, "happy"),         # 21: held up
+    (0, -1, ("nub", "low"), "on", True, "open"),
+    (0.5, -0.5, ("mid", "low"), "on", True, "open"),
+    (1, 0, ("low", "low"), "on", True, "open"),
+    (0.5, 0, ("low", "low"), "on", True, "open"),
+    (0, 0, ("none", "none"), "on", False, "open"),        # dumbbells put away
+    (0, 0, ("low", "low"), "on", False, "open"),
+    (0, 0, ("none", "none"), "on", False, "happy"),
+    (0, 0, ("side", "side"), "on", False, "happy"),
+    (0, 0, ("nub", "nub"), "stretch", False, "open"),     # band off
+    (0, 0, ("nub", "side"), "up", False, "open"),
+    (0, 0, ("side", "side"), "mid", False, "open"),
+    (0, 0, ("low", "side"), "low", False, "open"),
+    (0, 0, ("low", "side"), None, False, "open"),
+    (0, 0, ("side", "side"), None, False, "happy"),
+]
+GYM_SEQ = list(range(25)) + list(range(13, 25)) + list(range(25, 36))
+BAND = {  # loose sweatband: (rows, x, y), held by the back hand or stretched over his head
+    "low": ([".NNNN.", "NwwwwN", ".NNNN."], -7.5, 4.5),
+    "mid": ([".NNNN.", "NwwwwN", ".NNNN."], -7.5, 1.5),
+    "up": ([".NNNN.", "NwwwwN", ".NNNN."], -4.75, -3),
+    "stretch": (["..NNNNNNNNNNNN..", ".NwwwwwwwwwwwwN.", "NNNNNNNNNNNNNNNN"], -4, -1.5),
+}
+BELL = [".kk.", "kkkk", "kkkk", ".kk."]
+BELLS = {  # a dumbbell in the front hand for each arm mode: (rows, x, y)
+    "low": (BELL, 5.5, 2.75),
+    "mid": (BELL, 4.5, -0.5),
+    "nub": ([".kk....kk.", "kkkk..kkkk", "kkkkggkkkk", ".kk....kk."], 0.75, -3.5),
+}
+
+
+def _gym_hold(i, frame):
+    if i == len(GYM_SEQ) - 1:
+        return 1.5
+    return {6: 0.27, 7: 0.27, 15: 0.4, 21: 0.4}.get(frame, 0.085)
+
+
+GYM_STARTS = [0.0]
+for _i, _f in enumerate(GYM_SEQ):
+    GYM_STARTS.append(GYM_STARTS[-1] + _gym_hold(_i, _f))
+GYM_DUR = GYM_STARTS.pop()
+
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
 HOLIDAY_DAY_EVERY = 6 * 60    # and more often on the day itself
@@ -384,6 +541,10 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "daydream": (0, 7, 10),  # only when you've been at the computer a long time
     "festive": (0, 8, 12),   # only around holidays and once in a while each season
     "omarchy": (0.6, 5, 7),  # a happy thought about Omarchy
+    "explore": (2, 0, 0),    # fixed length: EXPLORE_DUR
+    "flag": (1, 5, 8),
+    "stomp": (1, 3, 5),
+    "gym": (1.5, 0, 0),      # fixed length: GYM_DUR
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -397,7 +558,7 @@ WORK_FOR_TOOL = {
     "Bash": "bash", "Agent": "carry", "Task": "carry",
 }
 # Little breaks he takes even while Claude is busy, so he isn't a strict mirror.
-BREAKS = ["dance", "look", "walk", "coffee", "idle", "sweep"]
+BREAKS = ["dance", "look", "walk", "coffee", "idle", "sweep", "explore", "gym"]
 
 STATUS_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "pixel-claude")
 STALE_AFTER = {"waiting": 1800, "working": 900, "thinking": 900, "done": 600, "hello": 600}
@@ -535,7 +696,18 @@ class Buddy:
         self.dur = dur
         self.mark = 0.0  # per-state spawn timer
         self.beat_k = -1  # last one-off moment fired (see beat)
-        if name in ("walk", "carry"):
+        self.frame_k = -1  # last frame seen (see advanced)
+        self.cheer = False
+        if name == "explore":  # head for whichever side has room for the trip
+            self.dur = EXPLORE_DUR
+            self.ex0 = self.x
+            self.ex_dir = 1 if self.x + LEAP_PX + WALK_PX <= self.max_x else -1
+            if self.ex_dir < 0 and self.x - LEAP_PX - WALK_PX < 0:
+                self.ex_dir = 1 if self.max_x - self.x > self.x else -1
+            self.facing = self.ex_dir
+        elif name == "gym":
+            self.dur = GYM_DUR
+        elif name in ("walk", "carry"):
             span = self.screen_w * random.uniform(0.15, 0.45)
             self.target = min(self.max_x, max(0, self.x + random.choice((-1, 1)) * span))
             if abs(self.target - self.x) < 40:
@@ -561,7 +733,7 @@ class Buddy:
     def next_activity(self):
         c = self.claude
         if c.state == "waiting" and random.random() < 0.7:
-            self.set_state("call", random.uniform(5, 8))
+            self.set_state(random.choice(("call", "flag")), random.uniform(5, 8))
             return
         if (self.user.active_for > LONG_ACTIVE and time.time() - self.last_dream > DREAM_EVERY
                 and random.random() < 0.6):
@@ -632,6 +804,13 @@ class Buddy:
             return True
         return False
 
+    def advanced(self, k):
+        """True the first time the state's frame counter reaches k."""
+        if k != self.frame_k:
+            self.frame_k = k
+            return True
+        return False
+
     def finish(self):
         s = self.state
         if s == "fall":
@@ -661,7 +840,7 @@ class Buddy:
             return  # let him enjoy it; only a permission prompt cuts it short
         was_busy = prev in ("working", "thinking")
         if c.state == "waiting":
-            self.set_state("call", random.uniform(5, 8))
+            self.set_state(random.choice(("call", "flag")), random.uniform(5, 8))
         elif c.state == "done" and was_busy:
             if random.random() < 0.85:
                 self.celebrate()
@@ -669,14 +848,18 @@ class Buddy:
             if self.state == "sleep":
                 self.spawn("bang", 0, -9, 0, 0, 0.8)
                 self.set_state("idle", 0.8)  # startled awake; work comes next
-            elif self.state == "call" or random.random() < 0.7:
+            elif self.state in ("call", "flag") or random.random() < 0.7:
                 self.set_state("think", random.uniform(2, 4))
-        elif prev == "waiting" and self.state == "call":
+        elif prev == "waiting" and self.state in ("call", "flag"):
             self.set_state("idle", 0.6)
         elif c.state == "hello" and self.state not in ("type", "read", "think"):
             self.set_state("wave", 1.6)
 
     def celebrate(self):
+        if random.random() < 0.4:  # a confetti stomp instead of the usual hop
+            self.set_state("stomp", 2.0)
+            self.cheer = True
+            return
         for _ in range(8):
             self.spawn("spark", random.uniform(-6, 6), random.uniform(-12, -7),
                        random.uniform(-3, 3), random.uniform(-4, -1), 0.9)
@@ -767,6 +950,33 @@ class Buddy:
                         self.set_state("idle", random.uniform(1, 3))
                 else:
                     self.x += step * self.facing
+
+        if s == "explore":
+            st = self.st
+            off = (LEAP_PX * tween(st, CROUCHES[0] + 0.1, 0.85, ease_inout)
+                   + WALK_PX * tween(st, WALK_ON, PEER - WALK_ON)
+                   - LEAP_PX * tween(st, CROUCHES[1] + 0.1, 0.85, ease_inout))
+            self.x = min(self.max_x, max(0, self.ex0 + self.ex_dir * off))
+            self.facing = self.ex_dir if st < CROUCHES[1] else -self.ex_dir
+            if self.advanced(sum(st >= c + 0.9 for c in CROUCHES)) and self.frame_k:
+                self.puff(4)  # touchdown
+
+        if s == "stomp" and self.advanced(int(self.st / STOMP_FRAME)):
+            fr = self.frame_k % 8
+            if fr in (1, 6):  # a corner is up: throw! (timed like the original's two bursts)
+                self.confetti(1 if fr == 1 else -1)
+            elif fr in (0, 4) and self.frame_k:
+                self.puff(2)
+
+        if s == "gym":
+            i = bisect.bisect_right(GYM_STARTS, self.st) - 1
+            if self.advanced(i):
+                frame = GYM_SEQ[i]
+                if frame in (11, 14, 20):  # a bead of sweat
+                    self.spawn("dot", -self.facing * 3, -8, -self.facing * 1.5, -3, 0.7,
+                               0.5, "#6FB7E8", 12)
+                elif frame == 35:
+                    self.celebrate_sparks(0, -10, 6)
 
         if s == "festive" and self.fest == "ghost":  # a slow spooky drift
             nx = self.x + self.facing * 10 * dt
@@ -871,6 +1081,22 @@ class Buddy:
                 self.spawn("leaf", random.uniform(-12, 12), sky, 0, 1.5, 12, 0.75,
                            random.choice(LEAVES), 1)
 
+    def confetti(self, side):
+        """A burst from the raised hand on that side: shoots up, spreads, thins out, falls."""
+        f = self.facing * side
+        for _ in range(12):  # little bits and strips, moving as one piece
+            vx, vy = f * 1.5 + random.uniform(-6, 6), random.uniform(-26, -18)
+            ttl, col = random.uniform(0.5, 1.0), random.choice(CONFETTI)
+            x, y = f * 3 + random.uniform(-1.5, 1.5), -11 + random.uniform(-1, 1)
+            for bx, by in random.choice(CONFETTI_BITS):
+                self.spawn("dot", x + bx, y + by, vx, vy, ttl, 0.5, col, 60)
+
+    def puff(self, n):
+        for _ in range(n):
+            d = random.choice((-1, 1))
+            self.spawn("dust", d * random.uniform(2, 5), -0.5, d * random.uniform(1, 3),
+                       random.uniform(-1.5, -0.3), 0.6)
+
     def celebrate_sparks(self, dx, dy, n):
         for _ in range(n):
             self.spawn("spark", dx + random.uniform(-2, 2), dy + random.uniform(-2, 1),
@@ -881,7 +1107,8 @@ class Buddy:
         """Describe this frame: how the body is arranged and what props to draw."""
         s, st, t = self.state, self.st, self.t
         p = {"bob": 0, "legs": [0, 0, 0, 0], "leg_h": 1.5, "arms": ["side", "side"],
-             "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0,
+             "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0, "lean": 0,
+             "tilt": 0,
              "front": [], "bubble": None, "over": [], "grip": [], "hat": None, "glasses": False}
         breathe = 0.5 if int(t / 1.1) % 2 else 0
         if s == "idle":
@@ -971,6 +1198,30 @@ class Buddy:
                 p["arms"] = ["side", "wave1" if int(st * 3) % 2 else "wave2"]
         elif s == "festive":
             self.festive_pose(p, breathe)
+        elif s == "explore":
+            self.explore_pose(p, breathe)
+        elif s == "flag":  # pole up, cloth rising then rippling, body leaning against it
+            f = int(st / FLAG_FRAME)
+            k = f if f < 12 else 3 + (f - 3) % 9
+            hx = HAND_PULL[k]
+            p["lean"] = SWAY[k]
+            p["arm_dy"] = [BACK_DROP[k], 0]
+            p["arms"] = ["side", "none"]
+            p["eyes"] = "happy"
+            p["front"].append(lambda B, g: self.draw_flag(B, k, hx))
+            p["grip"].append((1, 2.5 + hx, -1.5, 1.5, 1.5))  # his front corner, raised as a hand
+            if self.claude.state == "waiting":
+                p["bubble"] = ("pop", "q")
+        elif s == "stomp":
+            p["tilt"], p["bob"], p["arms"] = STOMP[int(st / STOMP_FRAME) % 8]
+            p["eyes"] = "happy"
+            if self.cheer:
+                p["bubble"] = ("pop", "check")
+        elif s == "gym":
+            frame = GYM_SEQ[bisect.bisect_right(GYM_STARTS, st) - 1]
+            p["bob"], p["tilt"], arms, band, bells, p["eyes"] = GYM_FRAMES[frame]
+            p["arms"] = list(arms)
+            p["over"].append(lambda B, g: self.draw_gym(B, arms, band, bells))
         elif s == "sleep":
             p["leg_h"] = 0.5
             p["eyes"] = "closed"
@@ -1009,6 +1260,43 @@ class Buddy:
         if p["eyes"] == "open" and self.t < self.blink_until:
             p["eyes"] = "blink"
         return p
+
+    def explore_pose(self, p, breathe):
+        st = self.st
+        # Body, eyes and legs lean together in one beat: back, ahead, upright.
+        lean = 0.5 * (-tween(st, LOOK_BACK, 0.4, ease_out) + 2 * tween(st, LOOK_AHEAD, 0.4, ease_out)
+                      - tween(st, UPRIGHT, 0.3, ease_out))
+        if WALK_ON <= st < CROUCHES[1]:
+            ph = int(st * 7) % 2
+            p["legs"] = [0.5, 0, 0.5, 0] if ph else [0, 0.5, 0, 0.5]
+            p["bob"] = 0.5 * ph
+            p["edx"] = 0.5
+            if st >= PEER:  # lean out and peer down
+                lean = 0.5 * tween(st, PEER, 0.3, ease_out)
+                p["legs"], p["bob"], p["edy"] = [0, 0, 0, 0], -lean, 0.5
+        elif st >= CROUCHES[1] + 1.05:
+            p["eyes"] = "happy"
+            p["bob"] = breathe
+        else:
+            p["edx"] = lean
+            p["bob"] = -abs(lean)  # leaning stretches the legs
+        p["lean"] = lean
+        for crouch in CROUCHES:
+            j = st - crouch - 0.1
+            if -0.1 <= j < 0:  # a quick snap down to gather momentum
+                k = tween(j, -0.1, 0.1, ease_in)
+                p["bob"], p["arm_dy"], p["lean"], p["edx"] = k, [k, k], 0, 0.5
+            elif 0 <= j < 1.05:
+                p["lean"], p["edx"] = 0, 0.5
+                p["jump"] = leap_height(j)
+                if j < 0.8:
+                    p["legs"] = [0.5, 0.5, 0.5, 0.5]
+                    p["arms"] = ["up", "up"] if j < 0.42 else ["side", "side"]
+                    p["arm_dy"] = [-0.5, -0.5] if j >= 0.42 else [0, 0]
+                    p["eyes"] = "happy"
+                else:  # land with a squash, the hands overshooting down then settling
+                    p["bob"] = 1 - tween(j, 0.8, 0.2, ease_out)
+                    p["arm_dy"] = [1, 1] if j < 0.85 else [p["bob"], p["bob"]]
 
     def festive_pose(self, p, breathe):
         v, st, t, dur = self.fest, self.st, self.t, self.dur
@@ -1141,7 +1429,14 @@ class Buddy:
         top = ground - p["leg_h"] - 6 + p["bob"]
         g = ground - top  # ground, relative to the top of his head
 
-        def B(x, y, w, h, c):  # body-relative rect, mirrored when facing left
+        def rise(x):  # tipped onto one side, the other side lifts (tilt > 0 lifts his front)
+            t = p["tilt"]
+            return -t * (x + 4) / 8 if t > 0 else t * (4 - x) / 8
+
+        def B(x, y, w, h, c, sway=1.0, tilted=True):  # body-relative rect, mirrored when facing left
+            if tilted and p["tilt"]:
+                y += rise(x + w / 2)
+            x += p["lean"] * sway
             if f < 0:
                 x = -(x + w)
             out.append((cx + x, top + y, w, h, c))
@@ -1157,15 +1452,32 @@ class Buddy:
 
         # legs, torso, arms
         for i, lx in enumerate((-4, -2, 1, 3)):
-            h = g - 6 - p["legs"][i]
-            if h > 0:
-                B(lx, 6, 1, h, BODY)
-        B(-4, 0, 8, 6, BODY)
+            hip = 6 + (rise(lx + 0.5) if p["tilt"] else 0)
+            h = g - hip - p["legs"][i]
+            if h > 0 and p["lean"]:  # slant from the leaning hips down to planted feet
+                for j in range(3):
+                    B(lx, hip + h * j / 3, 1, h / 3 + 0.01, BODY, (2 - j) / 2, False)
+            elif h > 0:
+                B(lx, hip, 1, h, BODY, tilted=False)
+        if p["tilt"]:  # a stepped slope, one column at a time
+            for c in range(8):
+                B(-4 + c, 0, 1, 6, BODY)
+        else:
+            B(-4, 0, 8, 6, BODY)
         for side, mode, dy in ((-1, p["arms"][0], p["arm_dy"][0]), (1, p["arms"][1], p["arm_dy"][1])):
             if mode == "side":
                 A(side, 4, 2 + dy, 2, 2)
             elif mode == "up":
                 A(side, 4, -1.5 + dy, 1.5, 4.5)
+            elif mode in ("nub", "nub2"):  # his top corner thrown up as a hand
+                A(side, 2.5, -1.5 if mode == "nub" else -2.5, 1.5, 1.5 if mode == "nub" else 2.5)
+            elif mode == "low":
+                A(side, 4, 3, 2, 1.5)
+            elif mode == "mid":
+                A(side, 4, 0.5, 1.5, 3)
+            elif mode == "vee":
+                A(side, 4, 1, 2, 2)
+                A(side, 5, 0, 1, 1)
             elif mode == "wave1":
                 A(side, 4, -1.5, 1.5, 4.5)
             elif mode == "wave2":
@@ -1254,6 +1566,26 @@ class Buddy:
                 B(x + c * px - o, y + r * px - o, px + 2 * o, px + 2 * o, OUTLINE)
         for c, r, ch in cells:
             B(x + c * px, y + r * px, px, px, COL[ch])
+
+    def draw_flag(self, B, k, hx):
+        B(3 + hx, -8, 0.5, 7.5, COL["s"])  # pole, held up in his front corner
+        B(2.75 + hx, -8.75, 1, 1, COL["y"])
+        x0, rows = FLAG_FRAMES[k]
+        self.sprite(B, rows, (3.5 if x0 >= 0 else 3) + x0 * 0.5 + hx, -9, outline=True)
+
+    def draw_gym(self, B, arms, band, bells):
+        if band == "on":  # sweatband across his forehead
+            B(-4, 0, 8, 0.25, COL["w"])
+            B(-4, 0.25, 8, 0.5, COL["N"])
+        elif band:
+            rows, x, y = BAND[band]
+            self.sprite(B, rows, x, y, outline=True)
+        if bells:
+            for side, mode in zip((-1, 1), arms):
+                rows, x, y = BELLS[mode]
+                if side < 0:
+                    x = -(x + len(rows[0]) * 0.5)
+                self.sprite(B, rows, x, y)
 
     def draw_sparkler(self, B, g):
         B(4.5, -4, 0.5, 2.5, COL["s"])
@@ -1519,6 +1851,10 @@ class App(Gtk.Application):
                  ("Celebrate the season", lambda: self.buddy.command("festive")),
                  ("Omarchy love", lambda: self.buddy.command("omarchy")),
                  ("Dance", lambda: self.buddy.command("dance")),
+                 ("Go exploring", lambda: self.buddy.command("explore")),
+                 ("Wave the flag", lambda: self.buddy.command("flag")),
+                 ("Confetti!", lambda: self.buddy.command("stomp")),
+                 ("Hit the gym", lambda: self.buddy.command("gym")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
         self.menu = Gtk.Popover(has_arrow=False)
