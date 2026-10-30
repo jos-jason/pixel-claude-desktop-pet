@@ -371,8 +371,9 @@ def _flag_frame(x0, width, droop, ph):
     mid = max(dist) // 2
     grid = [["."] * width for _ in range(H + 2 + max(offs))]
     for c, (d, off) in enumerate(zip(dist, offs)):
-        for r in range(H):  # the spark shows whichever way the cloth is blowing
-            emblem = 0 <= r - 1 < 5 and 0 <= d - mid + 2 < 5 and STAR[r - 1][d - mid + 2] == "o"
+        for r in range(H):  # the spark shows either way it blows, but not mid-wrap round the pole
+            emblem = (not x0 < 0 < x0 + width and 0 <= r - 1 < 5 and 0 <= d - mid + 2 < 5
+                      and STAR[r - 1][d - mid + 2] == "o")
             grid[r + off + 2][c] = "o" if emblem else "w"
     return x0, ["".join(row) for row in grid]
 
