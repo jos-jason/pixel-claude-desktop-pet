@@ -17,6 +17,7 @@ case "$1" in
   PreToolUse)       state=working ;;
   PostToolUse)      state=thinking ;;
   Stop)             state=done ;;
+  PostToolUseFailure|StopFailure) state=error ;;  # a tool failed, or the turn died
   Notification)
     case "$ntype" in
       permission_prompt|elicitation_dialog) state=waiting ;;

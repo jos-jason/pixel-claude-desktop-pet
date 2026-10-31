@@ -10,7 +10,8 @@ APP="$DATA/pixel-claude"
 BIN="$HOME/.local/bin"
 HYPR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-EVENTS=(SessionStart SessionEnd UserPromptSubmit Stop PreToolUse PostToolUse Notification)
+EVENTS=(SessionStart SessionEnd UserPromptSubmit Stop PreToolUse PostToolUse PostToolUseFailure
+        StopFailure Notification)
 
 yes=0
 [[ ${1:-} == -y || ${1:-} == --yes ]] && yes=1

@@ -504,6 +504,30 @@ TERM_CURSOR = rgba("#D9D6DE")
 TERM_LINES = [9.5, 11, 9.5, 9.5, 10.5]  # lengths of the output lines, in cells
 
 
+# idea: the "idea Claude" GIF. Front corner raised, a lightbulb flickering over his head.
+# Bulb pixels are half cells; it plays (sprite, seconds) and he blinks on the starred frame.
+BULB_COL = {k: rgba(v) for k, v in {
+    "a": "#FCCC9C", "b": "#FCB46C", "c": "#FCFCE4", "d": "#FCB454", "e": "#FCCC84",
+    "f": "#848484", "g": "#CCB4B4", "m": "#CC8424", "n": "#FCE49C", "q": "#FCCC6C"}.items()}
+BULB_LIT = ["..aaaaa..", ".bacacab.", "dacacacad", "dadaaadad", "daeaaaead",
+            ".dadadad.", "..ddddd..", "..fffff..", "..ggggg..", "...fff..."]
+BULB_BRIGHT = ["..ddddd..", ".dnnnnnd.", "dncncncnd", "dncnnncnd", "dndnnndnd",
+               "dnndndnnd", "..qdqdq..", "..fffff..", "..ggggg..", "...fff..."]
+BULB_DIM = ["..ddddd..", ".ddddddd.", "dbddddddd", "ddddddddd", "ddmdddmdd",
+            "ddmdddmdd", ".ddmdmdd.", "..dmdmd..", "..ggggg..", "...fff..."]
+IDEA_FRAMES = [(BULB_LIT, 0.1), (BULB_DIM, 0.2), (BULB_LIT, 0.2), (BULB_BRIGHT, 0.2, "blink"),
+               (BULB_BRIGHT, 0.2), (BULB_DIM, 0.2)]
+IDEA_LOOP = sum(f[1] for f in IDEA_FRAMES)
+
+# error: the "error claude" GIF. Knocked flat on his back, legs in the air, X X eyes and one arm
+# twitching, while a red ERROR flashes overhead and little puffs of smoke rise.
+ERROR_RED = rgba("#F03C2E")
+FONT = {"E": ["###", "#..", "##.", "#..", "###"], "R": ["##.", "#.#", "##.", "#.#", "#.#"],
+        "O": [".#.", "#.#", "#.#", "#.#", ".#."]}
+TWITCH = ["diamond", "half", "stub", "diamond", "stub", "half"]  # his front arm, 130ms apiece
+SMOKE = (rgba("#B5C0C6"), rgba("#D3DBDF"))
+
+
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
 HOLIDAY_DAY_EVERY = 6 * 60    # and more often on the day itself
@@ -594,6 +618,8 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "sidetype": (2, 5, 9),   # pulls out a laptop, turns side-on and types
     "sparkler": (1, 0, 0),   # fixed length: SPARK_DUR
     "terminal": (0, 5, 8),   # only when Claude asks to run a command
+    "idea": (0.5, 2.2, 3.3),  # also the moment Claude starts acting on your prompt
+    "error": (0, 3, 3),      # when a tool fails, or menu
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -610,8 +636,8 @@ WORK_FOR_TOOL = {
 BREAKS = ["dance", "look", "walk", "coffee", "idle", "sweep", "explore", "gym", "content"]
 
 STATUS_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "pixel-claude")
-STALE_AFTER = {"waiting": 1800, "working": 900, "thinking": 900, "done": 600, "hello": 600}
-PRIORITY = ["waiting", "working", "thinking", "done", "hello"]
+STALE_AFTER = {"waiting": 1800, "error": 120, "working": 900, "thinking": 900, "done": 600, "hello": 600}
+PRIORITY = ["waiting", "error", "working", "thinking", "done", "hello"]
 
 
 class ActivityWatch:
@@ -724,6 +750,7 @@ class Buddy:
         self.greeted = False
         self.on_bye = None
         self.claude = ClaudeWatch()
+        self.fresh_prompt = False  # a prompt Claude hasn't made its first move on yet
         self.poll_t = 0.0
         self.user = ActivityWatch()
         self.user_poll_t = 0.0
@@ -891,13 +918,19 @@ class Buddy:
         c = self.claude
         if self.state == "petted" and c.state != "waiting":
             return  # let him enjoy it; only a permission prompt cuts it short
-        was_busy = prev in ("working", "thinking")
+        was_busy = prev in ("working", "thinking", "error")
         if c.state == "waiting":
             self.set_state(self.attention(), random.uniform(5, 8))
+        elif c.state == "error":
+            self.set_state("error", 3.0)
+        elif c.state == "working" and self.fresh_prompt:  # first move on a new prompt: an idea!
+            self.fresh_prompt = False
+            self.set_state("idea", 2.2)
         elif c.state == "done" and was_busy:
             if random.random() < 0.85:
                 self.celebrate()
         elif c.busy and not was_busy:
+            self.fresh_prompt = True
             if self.state == "sleep":
                 self.spawn("bang", 0, -9, 0, 0, 0.8)
                 self.set_state("idle", 0.8)  # startled awake; work comes next
@@ -1026,6 +1059,9 @@ class Buddy:
                 self.confetti(1 if fr == 1 else -1)
             elif fr in (0, 4) and self.frame_k:
                 self.puff(2)
+
+        if s == "error" and self.advanced(int((self.st + 0.33) / 0.6)):  # as ERROR blinks off
+            self.spawn("puff", self.facing * random.uniform(-0.5, 1.5), -8.5, 0, -2.5, 0.9)
 
         if s == "sparkler":
             phase, _, (tx, ty) = self.sparkler_at(self.st)
@@ -1173,7 +1209,7 @@ class Buddy:
         s, st, t = self.state, self.st, self.t
         p = {"bob": 0, "legs": [0, 0, 0, 0], "leg_h": 1.5, "arms": ["side", "side"],
              "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0, "lean": 0,
-             "tilt": 0, "side": None,
+             "tilt": 0, "side": None, "flat": None,
              "front": [], "bubble": None, "over": [], "grip": [], "hat": None, "glasses": False}
         breathe = 0.5 if int(t / 1.1) % 2 else 0
         if s == "idle":
@@ -1291,6 +1327,23 @@ class Buddy:
             self.sidetype_pose(p)
         elif s == "sparkler":
             self.sparkler_pose(p)
+        elif s == "idea":
+            t, blink = st % IDEA_LOOP, False
+            for frame in IDEA_FRAMES:
+                if t < frame[1]:
+                    bulb, blink = frame[0], len(frame) > 2
+                    break
+                t -= frame[1]
+            p["arms"] = ["side", "none"]
+            p["eyes"] = "none"
+            p["over"].append(lambda B, g: (B(0, -0.5, 4, 0.5, BODY), B(1.5, -2, 2, 1, BODY),
+                                           B(1.5, -1, 2, 0.5, BODY_D)))  # his front corner, raised
+            p["front"].append(lambda B, g: self.draw_idea(B, bulb, blink))
+        elif s == "error":
+            p["flat"] = TWITCH[int(st / 0.13) % len(TWITCH)]
+            p["eyes"] = "none"
+            if (st % 0.6) < 0.33:
+                p["bubble"] = ("error",)
         elif s == "terminal":  # excited little bounces under the terminal
             ph = st % 0.5
             p["jump"] = 0.75 * math.sin(math.pi * ph / 0.5)
@@ -1616,7 +1669,7 @@ class Buddy:
             out.append((GW / 2 - sw / 2, GROUND, sw, 0.5, SHADOW))
 
         # legs, torso, arms
-        for i, lx in enumerate(() if p["side"] is not None else (-4, -2, 1, 3)):
+        for i, lx in enumerate(() if p["side"] is not None or p["flat"] else (-4, -2, 1, 3)):
             hip = 6 + (rise(lx + 0.5) if p["tilt"] else 0)
             h = g - hip - p["legs"][i]
             if h > 0 and p["lean"]:  # slant from the leaning hips down to planted feet
@@ -1629,6 +1682,9 @@ class Buddy:
                 B(-4 + c, 0, 1, 6, BODY)
         elif p["side"] is not None:
             self.draw_side_body(B, g, p["side"])
+        elif p["flat"]:
+            self.draw_flat_body(B, g, p["flat"])
+            p["arms"] = ["none", "none"]
         else:
             B(-4, 0, 8, 6, BODY)
         for side, mode, dy in ((-1, p["arms"][0], p["arm_dy"][0]), (1, p["arms"][1], p["arm_dy"][1])):
@@ -1714,6 +1770,9 @@ class Buddy:
             lx = pt.wx - self.x / CELL
             if pt.kind == "dust":
                 out.append((lx, pt.y, 0.75, 0.75, rgba("#D8CFC4", 0.8 * fade)))
+            elif pt.kind == "puff":  # two overlapping squares of smoke
+                for (ox, oy), col in zip(((0, 0.4), (0.4, 0)), SMOKE):
+                    out.append((lx + ox, pt.y + oy, 0.75, 0.75, rgba(col.to_string(), fade)))
             elif pt.kind == "steam":
                 out.append((lx, pt.y, 0.5, 0.5, rgba("#FFFFFF", 0.7 * fade)))
             elif pt.kind in ("dot", "leaf"):
@@ -1721,6 +1780,33 @@ class Buddy:
             else:
                 self.glyph(out, pt.kind, lx, pt.y, pt.size, fade)
         return out
+
+    def draw_idea(self, B, bulb, blink):
+        """Eyes (the front one a touch higher, tipped up as he is) and the bulb overhead."""
+        for x, y in ((-3, 0.75), (2, 0.25)):
+            B(x, y + (0.5 if blink else 0), 1, 0.5 if blink else 1, EYE)
+        for r, row in enumerate(bulb):
+            for c, ch in enumerate(row):
+                if ch != ".":
+                    B(-3.25 + c * 0.5, -7 + r * 0.5, 0.5, 0.5, BULB_COL[ch])
+
+    def draw_flat_body(self, B, g, arm):
+        """Flat on his back: a low wide body, legs up, X X eyes, one arm twitching."""
+        B(-4, g - 3, 8, 3, BODY)
+        for lx in (-2.85, -1.6, 0.9, 2.2):
+            B(lx, g - 3.6, 0.75, 0.6, BODY)
+        B(-5.25, g - 1.25, 1.25, 1.25, BODY)  # the far arm, flopped on the floor
+        for cx in (-2.5, 1.75):
+            for px, py in ((0, 0), (2, 0), (1, 1), (0, 2), (2, 2)):
+                B(cx - 0.6 + px * 0.4, g - 1.85 + py * 0.4, 0.4, 0.4, EYE)
+        if arm == "diamond":
+            for px, py in ((1, 0), (0, 1), (1, 1), (2, 1), (1, 2)):
+                B(4 + px * 0.5, g - 2.75 + py * 0.5, 0.5, 0.5, BODY)
+        elif arm == "stub":
+            B(4, g - 2, 0.75, 1.5, BODY)
+        else:
+            B(4, g - 1.75, 0.5, 1, BODY)
+            B(4.75, g - 2.25, 0.5, 0.5, BODY)
 
     def draw_side_body(self, B, g, paw):
         """Turned three-quarters toward his front: the far side in shade, eyes low and forward,
@@ -1852,6 +1938,17 @@ class Buddy:
         kind = spec[0]
         if kind == "terminal":
             self.draw_terminal(out)
+            return
+        if kind == "error":  # red ERROR over him, never mirrored
+            px, word = 0.3, "ERROR"
+            x = cx - (len(word) * 4 - 1) * px / 2
+            y = GROUND - 3 - 2.5 - 5 * px
+            for ch in word:
+                for r, row in enumerate(FONT[ch]):
+                    for c, on in enumerate(row):
+                        if on == "#":
+                            out.append((x + c * px, y + r * px, px, px, ERROR_RED))
+                x += 4 * px
             return
         if kind == "pop":  # just a glyph floating over his head
             gl = GLYPHS[spec[1]]
@@ -2098,6 +2195,8 @@ class App(Gtk.Application):
                  ("Laptop on the floor", lambda: self.buddy.command("sidetype")),
                  ("Sparkler", lambda: self.buddy.command("sparkler")),
                  ("Terminal excitement", lambda: self.buddy.command("terminal")),
+                 ("Bright idea", lambda: self.buddy.command("idea")),
+                 ("Oops, an error", lambda: self.buddy.command("error")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
         self.menu = Gtk.Popover(has_arrow=False)
