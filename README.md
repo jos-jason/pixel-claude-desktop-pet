@@ -32,7 +32,8 @@ doing, too.
   reading or searching he reads, and while it runs commands he types or hauls
   crates. When Claude is thinking, he thinks. When it finishes, he celebrates
   (sometimes with a confetti stomp). If it needs your permission or an answer, he
-  waves at you, or waves a flag, with a question mark. He
+  waves at you, or waves a flag, with a question mark. When it's asking to run a
+  terminal command, a terminal pops up over his head and he bounces excitedly. He
   still takes the odd break, so he's never a strict mirror.
 - **Reminds you to get outside.** After about an hour of nonstop computer use, he
   sometimes daydreams about trees, mountain trails or birdwatching.

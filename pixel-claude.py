@@ -496,6 +496,14 @@ def heart_point(u):
     return 3.5 + 0.13 * x, -6.75 - 0.13 * y
 
 
+# terminal: Claude wants to run a command and needs your OK. A terminal pops up over his head,
+# fills with output and waits at a blinking prompt while he bounces with excited > < eyes.
+TERM_BG = rgba("#2A2733")
+TERM_TEXT = rgba("#8E8C95")
+TERM_CURSOR = rgba("#D9D6DE")
+TERM_LINES = [9.5, 11, 9.5, 9.5, 10.5]  # lengths of the output lines, in cells
+
+
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
 HOLIDAY_DAY_EVERY = 6 * 60    # and more often on the day itself
@@ -585,6 +593,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "content": (2, 5, 9),    # smiling, a gentle sway, all is well
     "sidetype": (2, 5, 9),   # pulls out a laptop, turns side-on and types
     "sparkler": (1, 0, 0),   # fixed length: SPARK_DUR
+    "terminal": (0, 5, 8),   # only when Claude asks to run a command
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -775,7 +784,7 @@ class Buddy:
     def next_activity(self):
         c = self.claude
         if c.state == "waiting" and random.random() < 0.7:
-            self.set_state(random.choice(("call", "flag")), random.uniform(5, 8))
+            self.set_state(self.attention(), random.uniform(5, 8))
             return
         if (self.user.active_for > LONG_ACTIVE and time.time() - self.last_dream > DREAM_EVERY
                 and random.random() < 0.6):
@@ -884,7 +893,7 @@ class Buddy:
             return  # let him enjoy it; only a permission prompt cuts it short
         was_busy = prev in ("working", "thinking")
         if c.state == "waiting":
-            self.set_state(random.choice(("call", "flag")), random.uniform(5, 8))
+            self.set_state(self.attention(), random.uniform(5, 8))
         elif c.state == "done" and was_busy:
             if random.random() < 0.85:
                 self.celebrate()
@@ -892,12 +901,18 @@ class Buddy:
             if self.state == "sleep":
                 self.spawn("bang", 0, -9, 0, 0, 0.8)
                 self.set_state("idle", 0.8)  # startled awake; work comes next
-            elif self.state in ("call", "flag") or random.random() < 0.7:
+            elif self.state in ("call", "flag", "terminal") or random.random() < 0.7:
                 self.set_state("think", random.uniform(2, 4))
-        elif prev == "waiting" and self.state in ("call", "flag"):
+        elif prev == "waiting" and self.state in ("call", "flag", "terminal"):
             self.set_state("idle", 0.6)
         elif c.state == "hello" and self.state not in ("type", "read", "think"):
             self.set_state("wave", 1.6)
+
+    def attention(self):
+        """How to get the user's attention: a terminal command to OK gets the excited terminal."""
+        if self.claude.tool == "Bash":
+            return "terminal"
+        return random.choice(("call", "flag"))
 
     def celebrate(self):
         if random.random() < 0.4:  # a confetti stomp instead of the usual hop
@@ -1276,6 +1291,12 @@ class Buddy:
             self.sidetype_pose(p)
         elif s == "sparkler":
             self.sparkler_pose(p)
+        elif s == "terminal":  # excited little bounces under the terminal
+            ph = st % 0.5
+            p["jump"] = 0.75 * math.sin(math.pi * ph / 0.5)
+            p["arm_dy"] = [-0.5, -0.5] if ph < 0.25 else [0, 0]
+            p["eyes"] = "excited"
+            p["bubble"] = ("terminal",)
         elif s == "content":  # eyes smiling shut now and then, swaying to a slow tune
             p["eyes"] = "closed" if (st % 4.5) > 3.2 else "happy"
             p["lean"] = 0.25 * math.sin(st * math.pi / 1.4)
@@ -1656,6 +1677,10 @@ class Buddy:
                 B(x + ex, 0.5 + ey, 1, 1.5, EYE)
             elif e in ("blink", "closed"):
                 B(x + ex, 1.25 + ey, 1, 0.5, EYE)
+            elif e == "excited":  # > <, pointing in at each other
+                near = x > 0  # the eye nearer his front gets "<"
+                for px, py in ((0, 0), (0.5, 0.5), (0, 1)):
+                    B(x + (0.5 - px if near else px), 0.5 + py, 0.5, 0.5, EYE)
             elif e == "happy":
                 B(x - 0.25, 1.0, 0.5, 0.5, EYE)
                 B(x + 0.25, 0.5, 0.5, 0.5, EYE)
@@ -1825,6 +1850,9 @@ class Buddy:
 
     def draw_bubble(self, out, spec, cx, top):
         kind = spec[0]
+        if kind == "terminal":
+            self.draw_terminal(out)
+            return
         if kind == "pop":  # just a glyph floating over his head
             gl = GLYPHS[spec[1]]
             gw = len(gl[0]) * 0.5
@@ -1908,6 +1936,28 @@ class Buddy:
                 n = int(self.st * 2.5) % 4
                 for i in range(n):
                     out.append((bx + 2.25 + i * 1.75, by + 2.25, 1, 1, BUBBLE_EDGE))
+
+    def draw_terminal(self, out):
+        """The terminal from the "Terminal excitement" art, in window cells (never mirrored)."""
+        w, h = 15, 7
+        k = min(1.0, self.st / 0.2)  # pops open
+        if k < 1:
+            w, h = w * (0.4 + 0.6 * k), h * (0.4 + 0.6 * k)
+        x, y = GW / 2 - w / 2, GROUND - 7.5 - 2.5 - h
+        out.append((x, y, w, h, TERM_BG))
+        if k < 1:
+            return
+        shown = (self.st - 0.2) / 0.15  # output lines print one after another
+        for i, length in enumerate(TERM_LINES):
+            n = min(1.0, max(0.0, shown - i)) * length
+            if n > 0:
+                out.append((x + 1, y + 0.75 + i * 0.9, round(n * 2) / 2, 0.5, TERM_TEXT))
+        if shown > len(TERM_LINES):  # then the prompt, waiting for you
+            py = y + h - 1.5
+            for px, pyy in ((0, 0), (0.5, 0.5), (0, 1)):
+                out.append((x + 1 + px, py + pyy - 0.25, 0.5, 0.5, TERM_TEXT))
+            if int(self.st / 0.5) % 2 == 0:
+                out.append((x + 2.5, py - 0.25, 0.75, 1.25, TERM_CURSOR))
 
     def glyph(self, out, name, x, y, px, alpha, outline=True):
         rows = GLYPHS[name]
@@ -2047,6 +2097,7 @@ class App(Gtk.Application):
                  ("Happy & content", lambda: self.buddy.command("content")),
                  ("Laptop on the floor", lambda: self.buddy.command("sidetype")),
                  ("Sparkler", lambda: self.buddy.command("sparkler")),
+                 ("Terminal excitement", lambda: self.buddy.command("terminal")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
         self.menu = Gtk.Popover(has_arrow=False)

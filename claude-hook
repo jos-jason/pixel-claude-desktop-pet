@@ -4,7 +4,10 @@
 # Each session gets one small JSON file; the buddy polls the directory.
 dir="${XDG_RUNTIME_DIR:-/tmp}/pixel-claude"
 mkdir -p "$dir"
-IFS=$'\x1f' read -r sid tool ntype < <(jq -r '[.session_id // "unknown", .tool_name // "", .notification_type // ""] | join("\u001f")')
+# A permission prompt only names its tool in the message ("...permission to use Bash").
+IFS=$'\x1f' read -r sid tool ntype < <(jq -r '[.session_id // "unknown",
+  (.tool_name // ((.message // "") | capture("permission to use (?<t>[A-Za-z]+)")?.t) // ""),
+  .notification_type // ""] | join("\u001f")')
 sid="${sid//\//_}"
 
 case "$1" in
