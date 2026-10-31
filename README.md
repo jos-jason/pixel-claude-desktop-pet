@@ -61,6 +61,7 @@ doing, too.
   | Valentine's Day (Feb 10–14) | Hugs a big beating heart |
   | St. Patrick's Day (Mar 14–17) | Dances a jig in a green top hat |
   | Easter (the few days around it) | Bunny-hops in bunny ears and finds an egg |
+  | Howard Vollum's birthday (May 31) | In a party hat, twiddles the knobs of an old Tektronix-style oscilloscope until the trace locks |
   | July 4th (Jul 1–5) | Waves a sparkler while fireworks go off |
   | Halloween (Oct 24–31) | Wears a sheet-ghost costume or shows off a jack-o'-lantern |
   | Thanksgiving (the few days around it) | Eats a pumpkin pie, bite by bite |

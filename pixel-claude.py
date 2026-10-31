@@ -578,6 +578,17 @@ LOOKS = [  # search: (eye dx, eye dy, front arm dy) for looking up, to the side,
 LOOK_HOLD = 1.0
 THANKS_HEARTS = 3.2
 
+# scope: May 31st, Howard Vollum's birthday (co-founder of Tektronix). A 1950s-style Tek scope:
+# blue-grey cabinet, a green CRT with a graticule, black knobs. He twiddles the timebase and
+# volts/div while the trace rolls, until it locks into a steady sine.
+SCOPE_COL = {k: rgba(v) for k, v in {
+    "cab": "#6F7F8E", "panel": "#AEB9C3", "dark": "#3E464E", "bezel": "#23282D", "screen": "#0B2416",
+    "grat": "#2C6343", "trace": "#9DFFB8", "knob": "#1C1C1C", "mark": "#E8E8E8", "red": "#C0392B"}.items()}
+SCOPE_GLOW = rgba("#5CFF8A", 0.3)
+SCOPE_KNOBS = (5, 3.5)  # the two big knobs' tops, above the floor
+SCOPE_LOCK = 0.72       # fraction of the act spent fiddling before the trace locks
+SCOPE_PX = 1 / 3        # trace pixels: a 12 x 9 screen
+
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -615,6 +626,7 @@ def occasions(d):
         (D(y, 2, 10), D(y, 2, 14), D(y, 2, 14), ["valentine"]),
         (D(y, 3, 14), D(y, 3, 17), D(y, 3, 17), ["stpatrick"]),
         (easter(y) - 4 * day, easter(y), easter(y) + day, ["easter"]),
+        (D(y, 5, 31), D(y, 5, 31), D(y, 5, 31), ["scope"]),  # Howard Vollum's birthday (1913)
         (D(y, 7, 1), D(y, 7, 4), D(y, 7, 5), ["fireworks"]),
         (D(y, 10, 24), D(y, 10, 31), D(y, 10, 31), ["ghost", "pumpkin"]),
         (thanks - 3 * day, thanks, thanks + day, ["pie"]),
@@ -1311,6 +1323,8 @@ class Buddy:
                 self.spawn("flake", random.uniform(-12, 12), sky, 0, random.uniform(1.5, 2.5), 12, 0.25)
             if v == "snowman" and self.beat(999, self.dur * 0.75):
                 self.celebrate_sparks(f * 8, -7, 5)
+        elif v == "scope" and self.beat(999, self.dur * SCOPE_LOCK):  # the trace holds still!
+            self.celebrate_sparks(f * 10.5, -8, 6)
         elif v == "pie" and self.beat(1.6, 1.3):  # crumbs from each bite
             for _ in range(4):
                 self.spawn("dot", f * random.uniform(1, 3), -4.5, random.uniform(-1.5, 1.5),
@@ -1823,6 +1837,22 @@ class Buddy:
             p["arms"] = ["up", "up"] if air else ["side", "side"]
             p["eyes"] = "happy"
             on_ground(self.pile, -5.5)
+        elif v == "scope":  # a party hat, twiddling a Tektronix scope's knobs until the trace locks
+            p["hat"] = "party"
+            lock = dur * SCOPE_LOCK
+            knob = int(st / 1.2) % 2  # which knob he's on: the timebase or the volts/div
+            turn = int(st / 0.3) % 4 if st < lock else 0
+            if st < lock:
+                p["arms"] = ["side", "none"]
+                p["edx"], p["edy"] = 0.5, 0.25
+                g = p["leg_h"] + 6 - p["bob"]  # the floor, from the top of his head
+                p["grip"].append((1, 4, g - SCOPE_KNOBS[knob], 2.5, 1))  # hand up against the knob
+            else:
+                p["eyes"] = "happy"
+                p["arms"] = ["side", "wave1" if int(st * 5) % 2 else "wave2"]
+                k = st - lock
+                p["jump"] = 1.5 * math.sin(math.pi * k / 0.5) if k < 0.5 else 0
+            p["front"].append(lambda B, g: self.draw_scope(B, g, st, lock, knob, turn))
         elif v == "snowman":  # building a snowman, then waving at it
             build = dur * 0.75
             stage = min(3, int(4 * st / build))
@@ -2047,6 +2077,53 @@ class Buddy:
         w = math.ceil(k * 9) * 0.5  # fills a half-cell column at a time
         if w:
             B(x + 1, y + 1, w, 1, BATTERY_FILL)
+
+    def draw_scope(self, B, g, st, lock, knob, turn):
+        """The oscilloscope on the floor in front of him, its trace following the knobs."""
+        C = SCOPE_COL
+        B(6, g - 7, 8, 6.5, C["cab"])
+        B(6.5, g - 6.5, 7, 5.5, C["panel"])
+        B(8.5, g - 7.5, 3, 0.5, C["dark"])  # carrying handle
+        for fx in (6.5, 12.5):
+            B(fx, g - 0.5, 1, 0.5, C["dark"])
+        for i, ky in enumerate(SCOPE_KNOBS):  # the big knobs, their pointer turning as he twists
+            B(6.5, g - ky, 1, 1, C["knob"])
+            mx, my = ((0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5))[turn if i == knob else 0]
+            B(6.5 + mx, g - ky + my, 0.5, 0.5, C["mark"])
+        B(6.75, g - 1.75, 0.5, 0.5, C["red"])
+        for i, kx in enumerate((8.5, 9.75, 11, 12.25)):
+            B(kx, g - 1.5, 0.5, 0.5, C["red" if i == 2 else "knob"])
+        for ky in (5.5, 4.25, 3):
+            B(13.25, g - ky, 0.5, 0.5, C["knob"])
+        B(8, g - 6, 5, 4, C["bezel"])
+        sx, sy, px = 8.5, g - 5.5, SCOPE_PX
+        B(sx, sy, 12 * px, 9 * px, C["screen"])
+        for c in (0, 11):  # rounded CRT corners
+            for r in (0, 8):
+                B(sx + c * px, sy + r * px, px, px, C["bezel"])
+        B(sx + px, sy + 4 * px, 10 * px, px, C["grat"])
+        B(sx + 6 * px, sy + px, px, 7 * px, C["grat"])
+        if st < 0.4:  # warming up: a dot, then a line, then the wave
+            cols, amp = [6], 0
+        elif st < 0.8:
+            half = int((st - 0.4) / 0.4 * 5) + 1
+            cols, amp = range(6 - half, 6 + half), 0
+        else:
+            cols = range(1, 11)
+            if st < lock:
+                tick, cycle = int(st / 0.3), int(st / 2.4)
+                freq = 1 + 0.5 * ((cycle + (tick % 4 if knob == 0 else 0)) % 4)
+                amp = 1 + (cycle * 2 + (tick % 4 if knob == 1 else 0)) % 4
+                phase = st * 9  # not triggered yet: it rolls
+            else:
+                freq, amp, phase = 1.5, 3, 0
+        prev = None
+        for c in cols:
+            y = 4 if not amp else 4 - round(amp * math.sin(2 * math.pi * freq * (c - 1) / 10 + phase))
+            lo, hi = (y, y) if prev is None else (min(y, prev), max(y, prev))
+            B(sx + c * px, sy + (lo - 1) * px, px, (hi - lo + 3) * px, SCOPE_GLOW)
+            B(sx + c * px, sy + lo * px, px, (hi - lo + 1) * px, C["trace"])
+            prev = y
 
     def draw_headphones(self, B, g):
         for r in PHONES:
