@@ -602,6 +602,20 @@ SCOPE_KNOBS = (5, 3.5)  # the two big knobs' tops, above the floor
 SCOPE_LOCK = 0.72       # fraction of the act spent fiddling before the trace locks
 SCOPE_PX = 1 / 3        # trace pixels: a 12 x 9 screen
 
+# bubbles: the "Bubble blowing Claude" still. Turned three-quarters toward his front, which is
+# lifted half a cell, a maroon wand loop at his mouth. Each bubble grows on the loop, lets go,
+# drifts up and pops. Rings are half-cell art; "h" is the highlight.
+WAND = rgba("#4A1626")
+BUBBLE_RING = rgba("#5E5E5E")
+BUBBLE_FILM = rgba("#FFFFFF", 0.22)
+BUBBLE_ART = [  # small, medium (growing on the wand), then full size as in the picture
+    ["xxx", "x.x", "xxx"],
+    [".xxx.", "x..hx", "x...x", "x...x", ".xxx."],
+    ["..xxxx..", ".x....x.", "x...h..x", "x......x", "x......x", ".x....x.", "..xxxx.."]]
+BUBBLE_CYCLE = 2.4  # seconds per bubble
+BUBBLE_GROW = (0.7, 1.1, 1.5)  # when it reaches each size; at the last it lets go
+BUBBLE_FLOAT = 2.6  # seconds in the air before it pops
+
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -705,6 +719,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "hearts": (0, THANKS_HEARTS, THANKS_HEARTS),  # when you thank Claude
     "recharged": (0, 3.6, 3.6),  # after a nap, or when you're back from a break
     "search": (1, 3, 6),         # looks up, to the side and down; also while Claude searches
+    "bubbles": (1.2, 7, 11),     # blowing bubbles
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -1312,6 +1327,10 @@ class Buddy:
                 elif frame == 35:
                     self.celebrate_sparks(0, -10, 6)
 
+        if s == "bubbles" and self.beat(BUBBLE_CYCLE, BUBBLE_GROW[2]):  # it lets go of the wand
+            f, g = self.facing, 8.5  # leg_h 2.5 + body 6, no bob while blowing
+            self.spawn("bubble", 6 if f > 0 else -10, -3 - g, f * 1.2, -1.5, BUBBLE_FLOAT, f)
+
         if s == "festive" and self.fest == "ghost":  # a slow spooky drift
             nx = self.x + self.facing * 10 * dt
             if nx <= 0 or nx >= self.max_x:
@@ -1358,6 +1377,13 @@ class Buddy:
                 p.vx = math.sin(p.life * 3) * 1.5
             if p.kind in ("flake", "leaf"):
                 p.vy = min(p.vy, 2.5)  # drift down gently
+            if p.kind == "bubble":  # wobbling along on the air (size holds its direction)
+                p.vx = p.size * 1.2 + math.sin(p.life * 4) * 0.8
+                if p.life >= p.ttl:  # pop!
+                    for i in range(6):
+                        a = i / 6 * 2 * math.pi
+                        self.particles.append(Particle("dot", p.wx + 1.75, p.y + 1.5, math.cos(a) * 4,
+                                                       math.sin(a) * 4, 0.3, 0.5, "#8E8E8E"))
         self.particles = [p for p in self.particles if p.life < p.ttl
                           and not (p.kind in ("flake", "leaf") and p.y > GROUND)]
 
@@ -1648,6 +1674,15 @@ class Buddy:
             blink = st >= filled and (low or (level == 100 and st < filled + 1.0))
             p["over"].append(lambda B, g: self.draw_battery(
                 B, k, st, level if bat.level is not None else None, charging, bool(blink)))
+        elif s == "bubbles":
+            p["leg_h"] = 2.5  # the picture's longer legs
+            p["arms"], p["eyes"] = ["none", "none"], "none"
+            blink = self.t < self.blink_until
+            p["body"] = lambda B, g: self.draw_bubble_body(B, g, blink)
+            t = st % BUBBLE_CYCLE
+            size = sum(t >= k for k in BUBBLE_GROW[:2]) if BUBBLE_GROW[0] <= t < BUBBLE_GROW[2] else None
+            p["bob"] = 0.5 if t < BUBBLE_GROW[0] else 0  # a breath in, then blow
+            p["front"].append(lambda B, g: self.draw_wand(B, size))
         elif s == "search":  # the "Looking up / to the side / down" stills, in turn
             p["edx"], p["edy"], front = LOOKS[int(st / LOOK_HOLD) % len(LOOKS)]
             p["arm_dy"] = [0, front]
@@ -2113,6 +2148,9 @@ class Buddy:
                     out.append((lx + ox, pt.y + oy, 0.75, 0.75, rgba(col.to_string(), fade)))
             elif pt.kind == "steam":
                 out.append((lx, pt.y, 0.5, 0.5, rgba("#FFFFFF", 0.7 * fade)))
+            elif pt.kind == "bubble":
+                self.draw_bubble_art(lambda x, y, w, h, c: out.append((x, y, w, h, c)),
+                                     BUBBLE_ART[2], lx, pt.y, fade)
             elif pt.kind in ("dot", "leaf"):
                 out.append((lx, pt.y, pt.size, pt.size, rgba(pt.col, fade)))
             else:
@@ -2177,6 +2215,43 @@ class Buddy:
             left = -(len(text) * 2 - 0.5) / 2  # each glyph 1.5 cells wide, half a cell apart
             for i, ch in enumerate(text):
                 self.art(B, DIGITS[ch], left + i * 2, y - 3, BATTERY_EDGE)
+
+    def draw_bubble_body(self, B, g, blink):
+        """Three-quarters toward his front, front lifted: shaded far edge, eyes shifted forward,
+        the back arm low, the front hand up holding the wand."""
+        B(-4, 0.5, 3.5, 6, BODY)
+        B(-0.5, 0, 4.5, 6, BODY)
+        B(-4, 0.5, 0.5, 6, DJ_SHADE)
+        B(-6, 3, 2, 2, BODY)
+        B(-6, 3, 0.5, 2, DJ_SHADE)
+        B(4, 2, 1.5, 2, BODY)
+        for lx, top in ((-3.5, 6.5), (-1.5, 6.5), (0.5, 6), (2.5, 6)):
+            B(lx, top, 1, g - top, BODY)
+        B(-3.5, 6.5, 0.5, g - 6.5, DJ_SHADE)
+        for x, y in ((-2, 1.5), (2.5, 1)):
+            B(x, y + (0.5 if blink else 0), 1, 0.5 if blink else 1, EYE)
+
+    def draw_wand(self, B, size):
+        """The wand's loop at his mouth (its handle end peeking under his hand), and the bubble
+        growing on it."""
+        for c, r in ((0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2)):
+            B(4.5 + c * 0.5, 0.5 + r * 0.5, 0.5, 0.5, WAND)
+        B(5, 1, 0.5, 0.5, BUBBLE_FILM)
+        B(5, 3.5, 0.5, 0.5, WAND)
+        if size is not None:
+            rows = BUBBLE_ART[size]
+            self.draw_bubble_art(B, rows, 6, 0.5 - len(rows) * 0.5, 1.0)
+
+    def draw_bubble_art(self, B, rows, x, y, alpha):
+        ring = BUBBLE_RING if alpha >= 1 else rgba(BUBBLE_RING.to_string(), alpha)
+        for r, row in enumerate(rows):
+            inside = [c for c, ch in enumerate(row) if ch != "."]
+            if len(inside) > 1:  # a faint film across the inside
+                a, b = inside[0], inside[-1]
+                B(x + (a + 1) * 0.5, y + r * 0.5, (b - a - 1) * 0.5, 0.5, rgba("#FFFFFF", 0.22 * alpha))
+            for c, ch in enumerate(row):
+                if ch in "xh":
+                    B(x + c * 0.5, y + r * 0.5, 0.5, 0.5, ring)
 
     def draw_scope(self, B, g, st, lock, knob, turn):
         """The oscilloscope on the floor in front of him, its trace following the knobs."""
@@ -2674,6 +2749,7 @@ class App(Gtk.Application):
                  ("Three little hearts", lambda: self.buddy.command("hearts")),
                  ("Recharge", lambda: self.buddy.command("recharged")),
                  ("Look around", lambda: self.buddy.command("search")),
+                 ("Blow bubbles", lambda: self.buddy.command("bubbles")),
                  ("Oops, an error", lambda: self.buddy.command("error")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
