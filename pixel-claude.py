@@ -559,6 +559,25 @@ DJ_HAND = [2, 2, 1, 1, 2, 2, 0, 1]  # which button his hand is on, a beat apiece
 MUSIC_ACTS = ["groove", "dj"]
 CALL_APPS = ("zoom", "teams", "webex", "skype", "slack")  # their audio isn't music
 
+# The "New Claude expressions" stills, scaled from their 12-unit-wide body to his 8 cells.
+# Props are half-cell pixel art, placed body-relative like the originals.
+SPARKLE_BLUE = rgba("#408FF7")
+SPARKLE_BIG = [["..x..", ".xxx.", "xxxxx", ".xxx.", "..x.."], ["...", ".x.", "..."]]  # full, dim
+SPARKLE_SMALL = [[".x.", "xxx", ".x."], ["x"]]
+HEART_RED = rgba("#D33737")
+HEART_SMALL = ["x.x", ".x."]
+HEART_BIG = [[".x.x.", "xxxxx", ".xxx.", "..x.."],
+             [".xx.xx.", "xxxxxxx", "xxxxxxx", ".xxxxx.", "..xxx..", "...x..."]]  # on the beat
+HEART_RISE = [(0.0, "dot"), (0.35, "small"), (0.7, "big")]  # when each one appears
+BATTERY_EDGE = rgba("#3A3A3A")
+BATTERY_GAP = rgba("#FFFFFF")
+BATTERY_FILL = rgba("#4CAF65")
+BATTERY_FILL_T = 2.2  # seconds to charge; then it's full
+LOOKS = [  # search: (eye dx, eye dy, front arm dy) for looking up, to the side, and down
+    (0, -0.75, 0), (0.5, -0.25, -1), (0, 1.75, 0)]
+LOOK_HOLD = 1.0
+THANKS_HEARTS = 3.2
+
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -654,6 +673,13 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "error": (0, 3.5, 3.5),  # when a tool fails, or menu
     "groove": (0, 8, 14),    # only while music plays, or menu
     "dj": (0, 10, 16),       # likewise
+    "hooray": (0, 2.4, 2.4),     # hands in the air when Claude finishes
+    "shocked": (0, 0.9, 0.9),    # "!" before a permission prompt, or woken from a nap
+    "wink": (0.6, 1.6, 1.6),     # also when a session says hello
+    "sparkle": (0.5, 2.6, 2.6),  # when Claude finishes, or after sweeping up
+    "hearts": (0, THANKS_HEARTS, THANKS_HEARTS),  # when you thank Claude
+    "recharged": (0, 3.6, 3.6),  # after a nap, or when you're back from a break
+    "search": (1, 3, 6),         # looks up, to the side and down; also while Claude searches
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -663,7 +689,7 @@ DREAM_EVERY = 8 * 60   # and then daydreams at most this often
 # What he does while Claude uses each tool ("bash" means typing or hauling crates).
 WORK_FOR_TOOL = {
     "Edit": "type", "Write": "type", "MultiEdit": "type", "NotebookEdit": "type",
-    "Read": "read", "Grep": "read", "Glob": "read", "WebFetch": "read", "WebSearch": "read",
+    "Read": "read", "Grep": "search", "Glob": "search", "WebFetch": "read", "WebSearch": "search",
     "Bash": "bash", "Agent": "carry", "Task": "carry",
 }
 # Little breaks he takes even while Claude is busy, so he isn't a strict mirror.
@@ -691,6 +717,7 @@ class ActivityWatch:
             self.irqs = ()
         self.sig = None
         self.last_input = self.active_since = time.time()
+        self.returned = False  # set when the user comes back from a break; the buddy clears it
 
     def signature(self):
         if not self.irqs:
@@ -715,6 +742,7 @@ class ActivityWatch:
         if self.sig is not None and sig != self.sig:
             if now - self.last_input > INPUT_BREAK:
                 self.active_since = now  # back from a break: start counting again
+                self.returned = True
             self.last_input = now
         self.sig = sig
 
@@ -764,6 +792,7 @@ class ClaudeWatch:
     def __init__(self):
         self.state, self.tool = "idle", ""
         self.last_busy = 0.0
+        self.thanks = False  # the latest prompt thanked Claude
 
     def poll(self):
         """Refresh; returns the previous state if it changed, else None."""
@@ -786,8 +815,9 @@ class ClaudeWatch:
                 continue
             key = (PRIORITY.index(st), -ts)
             if best is None or key < best[0]:
-                best = (key, st, d.get("tool") or "")
+                best = (key, st, d.get("tool") or "", bool(d.get("thanks")))
         state, tool = (best[1], best[2]) if best else ("idle", "")
+        self.thanks = bool(best and best[3])
         if state in ("working", "thinking"):
             self.last_busy = now
         if tool:
@@ -974,8 +1004,13 @@ class Buddy:
                 self.greeted = True
                 self.set_state("wave", 1.6)
             else:
-                self.spawn("bang", 0, -9, 0, 0, 0.8)
-                self.set_state("idle", 1.5)
+                self.set_state("shocked")
+        elif s == "sleep":
+            self.set_state("recharged")
+        elif s == "shocked" and self.claude.state == "waiting":
+            self.set_state(self.attention(), random.uniform(5, 8))
+        elif s == "sweep" and random.random() < 0.5:
+            self.set_state("sparkle")  # all clean
         elif s == "drop":
             self.set_state("hop", 0.6)
         elif s == "bye":
@@ -990,11 +1025,11 @@ class Buddy:
         if self.state in ("held", "fall", "land", "bye"):
             return
         c = self.claude
-        if self.state == "petted" and c.state != "waiting":
+        if self.state in ("petted", "hearts") and c.state != "waiting":
             return  # let him enjoy it; only a permission prompt cuts it short
         was_busy = prev in ("working", "thinking", "error")
         if c.state == "waiting":
-            self.set_state(self.attention(), random.uniform(5, 8))
+            self.set_state("shocked")  # "!", then he gets your attention
         elif c.state == "error":
             self.set_state("error", 3.5)
         elif c.state == "working" and self.fresh_prompt:  # first move on a new prompt: an idea!
@@ -1005,15 +1040,16 @@ class Buddy:
                 self.celebrate()
         elif c.busy and not was_busy:
             self.fresh_prompt = True
-            if self.state == "sleep":
-                self.spawn("bang", 0, -9, 0, 0, 0.8)
-                self.set_state("idle", 0.8)  # startled awake; work comes next
+            if c.thanks:  # you thanked Claude: a little burst of love
+                self.set_state("hearts")
+            elif self.state == "sleep":
+                self.set_state("shocked")  # startled awake; work comes next
             elif self.state in ("call", "flag", "terminal") or random.random() < 0.7:
                 self.set_state("think", random.uniform(2, 4))
         elif prev == "waiting" and self.state in ("call", "flag", "terminal"):
             self.set_state("idle", 0.6)
         elif c.state == "hello" and self.state not in ("type", "read", "think"):
-            self.set_state("wave", 1.6)
+            self.set_state(random.choice(("wave", "wink")), 1.6)
 
     def attention(self):
         """How to get the user's attention: a terminal command to OK gets the excited terminal."""
@@ -1037,9 +1073,16 @@ class Buddy:
             self.set_state("idle", 1.0)
 
     def celebrate(self):
-        if random.random() < 0.4:  # a confetti stomp instead of the usual hop
+        r = random.random()
+        if r < 0.3:  # a confetti stomp instead of the usual hop
             self.set_state("stomp", 2.0)
             self.cheer = True
+            return
+        if r < 0.55:
+            self.set_state("hooray")
+            return
+        if r < 0.7:
+            self.set_state("sparkle")
             return
         for _ in range(8):
             self.spawn("spark", random.uniform(-6, 6), random.uniform(-12, -7),
@@ -1098,6 +1141,11 @@ class Buddy:
         if self.user_poll_t > 5:
             self.user_poll_t = 0
             self.user.poll()
+            if self.user.returned:  # welcome back: fully recharged
+                self.user.returned = False
+                if s in ("idle", "look", "walk", "content", "sleep", "daydream", "read", "coffee"):
+                    self.set_state("recharged")
+                    s = self.state
 
         self.music_poll_t += dt
         if self.music_poll_t > 2:
@@ -1471,6 +1519,35 @@ class Buddy:
             hand = DJ_HAND[beat % len(DJ_HAND)]
             p["over"].append(self.draw_headphones)
             p["front"].append(lambda B, g: self.draw_decks(B, g, hand, beat))
+        elif s == "hooray":  # hands in the air, bouncing
+            p["arms"] = ["raised", "raised"]
+            p["jump"] = 1.0 * abs(math.sin(math.pi * st / 0.6))
+        elif s == "shocked":
+            p["eyes"] = "wide"
+            p["jump"] = 1.0 * math.sin(math.pi * st / 0.3) if st < 0.3 else 0
+            p["over"].append(lambda B, g: self.draw_bang(B, min(1, st / 0.15)))
+        elif s == "wink":
+            p["eyes"] = "winkhook" if 0.3 < st < 1.2 else "open"
+            p["bob"] = 0.5 if 0.3 < st < 1.2 else 0
+        elif s == "sparkle":
+            p["bob"] = breathe
+            p["over"].append(lambda B, g: self.draw_sparkles(B, st))
+        elif s == "hearts":
+            p["bob"] = 0.5 if int(st / 0.5) % 2 else 0
+            p["arm_dy"] = [p["bob"], p["bob"]]
+            p["over"].append(lambda B, g: self.draw_hearts(B, st))
+        elif s == "recharged":
+            full = st >= BATTERY_FILL_T
+            if full and st < BATTERY_FILL_T + 0.6:  # charged! a hop
+                p["jump"] = 1.5 * math.sin(math.pi * (st - BATTERY_FILL_T) / 0.6)
+                p["arms"] = ["up", "up"]
+            p["eyes"] = "happy" if full else p["eyes"]
+            p["edy"] = 0 if full else -0.25  # watching it fill
+            p["over"].append(lambda B, g: self.draw_battery(B, min(1, st / BATTERY_FILL_T), st))
+        elif s == "search":  # the "Looking up / to the side / down" stills, in turn
+            p["edx"], p["edy"], front = LOOKS[int(st / LOOK_HOLD) % len(LOOKS)]
+            p["arm_dy"] = [0, front]
+            p["bob"] = breathe
         elif s == "terminal":  # excited little bounces under the terminal
             ph = st % 0.5
             p["jump"] = 0.75 * math.sin(math.pi * ph / 0.5)
@@ -1823,6 +1900,8 @@ class Buddy:
                 A(side, 4, -1.5 + dy, 1.5, 4.5)
             elif mode in ("nub", "nub2"):  # his top corner thrown up as a hand
                 A(side, 2.5, -1.5 if mode == "nub" else -2.5, 1.5, 1.5 if mode == "nub" else 2.5)
+            elif mode == "raised":  # straight up off his top corners
+                A(side, 4, -3, 1.5, 3)
             elif mode == "low":
                 A(side, 4, 3, 2, 1.5)
             elif mode == "mid":
@@ -1866,6 +1945,12 @@ class Buddy:
                 near = x > 0  # the eye nearer his front gets "<"
                 for px, py in ((0, 0), (0.5, 0.5), (0, 1)):
                     B(x + (0.5 - px if near else px), 0.5 + py, 0.5, 0.5, EYE)
+            elif e == "winkhook":  # the front eye a dash with a little hook; the other open
+                if x > 0:
+                    B(x - 0.5 + ex, 1.25 + ey, 1.5, 0.5, EYE)
+                    B(x + 1 + ex, 1.75 + ey, 0.5, 0.5, EYE)
+                else:
+                    B(x + ex, 0.75 + ey, 1, 1, EYE)
             elif e == "smile":  # shut and smiling, a little U
                 B(x - 0.5 + ex, 1 + ey, 0.5, 0.5, EYE)
                 B(x + 1 + ex, 1 + ey, 0.5, 0.5, EYE)
@@ -1913,6 +1998,55 @@ class Buddy:
             else:
                 self.glyph(out, pt.kind, lx, pt.y, pt.size, fade)
         return out
+
+    def art(self, B, rows, x, y, col, px=0.5):
+        """One-color half-cell pixel art ('x' filled), its top-left at body-relative x, y."""
+        for r, row in enumerate(rows):
+            for c, ch in enumerate(row):
+                if ch == "x":
+                    B(x + c * px, y + r * px, px, px, col)
+
+    def draw_bang(self, B, k):
+        """The "!" from "Shocked Claude", popping up over his head."""
+        dy = 0.5 * (1 - k)
+        B(-0.5, -4 + dy, 1, 2, EYE)
+        B(-0.5, -1.5 + dy, 1, 0.5, EYE)
+
+    def draw_sparkles(self, B, st):
+        """The "Blue Sparkles" still, twinkling out of step: a big one, a small one and a dot."""
+        big = SPARKLE_BIG[int(st / 0.35) % 3 == 2]
+        small = SPARKLE_SMALL[int(st / 0.35 + 1) % 3 == 2]
+        n = len(big[0])
+        self.art(B, big, -0.25 - n / 4, -2.75 - n / 4, SPARKLE_BLUE)
+        n = len(small[0])
+        self.art(B, small, 3.75 - n / 4, -2.5 - n / 4, SPARKLE_BLUE)
+        if int(st / 0.35) % 3:
+            B(2, -1.25, 0.5, 0.5, SPARKLE_BLUE)
+
+    def draw_hearts(self, B, st):
+        """The "Three Little hearts" still: they pop up one by one, drift, and the big one beats."""
+        shown = {name for t0, name in HEART_RISE if st >= t0}
+        drift = -0.5 * (int(st / 0.5) % 2)
+        if "dot" in shown:
+            B(0.5, -1.5 + drift, 0.5, 0.5, HEART_RED)
+        if "small" in shown:
+            self.art(B, HEART_SMALL, -1.5, -3.75 - drift, HEART_RED)
+        if "big" in shown:
+            beat = HEART_BIG[int((st - 0.7) / 0.4) % 2]
+            n, m = len(beat[0]), len(beat)
+            self.art(B, beat, 3.25 - n / 4, -2.5 - m / 2 + drift, HEART_RED)
+
+    def draw_battery(self, B, k, st):
+        """The "Battery full" still, charging up from empty; it blinks once it's full."""
+        if k >= 1 and int((st - BATTERY_FILL_T) / 0.25) % 2 and st < BATTERY_FILL_T + 1.0:
+            return
+        x, y = -3.5, -6.5
+        B(x, y, 6.5, 3, BATTERY_EDGE)
+        B(x + 6.5, y + 1, 0.5, 1, BATTERY_EDGE)  # the nub
+        B(x + 0.5, y + 0.5, 5.5, 2, BATTERY_GAP)
+        w = math.ceil(k * 9) * 0.5  # fills a half-cell column at a time
+        if w:
+            B(x + 1, y + 1, w, 1, BATTERY_FILL)
 
     def draw_headphones(self, B, g):
         for r in PHONES:
@@ -2335,7 +2469,7 @@ class App(Gtk.Application):
         return False
 
     def build_menu(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box = Gtk.Grid()  # two columns, so the long list fits on screen
         items = [("Pet", lambda: self.buddy.pet()),
                  ("Get to work", lambda: self.buddy.command("type")),
                  ("Tidy up", lambda: self.buddy.command("sweep")),
@@ -2356,14 +2490,22 @@ class App(Gtk.Application):
                  ("Bright idea", lambda: self.buddy.command("idea")),
                  ("Headphones dance", lambda: self.buddy.command("groove")),
                  ("DJ set", lambda: self.buddy.command("dj")),
+                 ("Hands in the air", lambda: self.buddy.command("hooray")),
+                 ("Shocked!", lambda: self.buddy.command("shocked")),
+                 ("Wink", lambda: self.buddy.command("wink")),
+                 ("Sparkles", lambda: self.buddy.command("sparkle")),
+                 ("Three little hearts", lambda: self.buddy.command("hearts")),
+                 ("Recharge", lambda: self.buddy.command("recharged")),
+                 ("Look around", lambda: self.buddy.command("search")),
                  ("Oops, an error", lambda: self.buddy.command("error")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
         self.menu = Gtk.Popover(has_arrow=False)
-        for label, fn in items:
+        rows = (len(items) + 1) // 2
+        for i, (label, fn) in enumerate(items):
             b = Gtk.Button(label=label, has_frame=False)
             b.connect("clicked", lambda _b, fn=fn: (self.menu.popdown(), fn()))
-            box.append(b)
+            box.attach(b, i // rows, i % rows, 1, 1)
         self.menu.set_child(box)
         self.menu.set_parent(self.canvas)
 

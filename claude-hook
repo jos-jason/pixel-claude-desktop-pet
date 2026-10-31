@@ -5,9 +5,12 @@
 dir="${XDG_RUNTIME_DIR:-/tmp}/pixel-claude"
 mkdir -p "$dir"
 # A permission prompt only names its tool in the message ("...permission to use Bash").
-IFS=$'\x1f' read -r sid tool ntype < <(jq -r '[.session_id // "unknown",
+# A prompt that thanks Claude gets him hearts.
+IFS=$'\x1f' read -r sid tool ntype thanks < <(jq -r '[.session_id // "unknown",
   (.tool_name // ((.message // "") | capture("permission to use (?<t>[A-Za-z]+)")?.t) // ""),
-  .notification_type // ""] | join("\u001f")')
+  .notification_type // "",
+  ((.prompt // "") | test("\\b(thanks|thank you|thank u|thx|ty|tysm|love (it|this|you)|awesome|great job|good job|nice work|nice job|well done|amazing|you rock|perfect)\\b"; "i"))]
+  | map(tostring) | join("\u001f")')
 sid="${sid//\//_}"
 
 case "$1" in
@@ -26,5 +29,13 @@ case "$1" in
   *) exit 0 ;;
 esac
 
-jq -nc --arg s "$state" --arg t "$tool" --arg e "$1" '{state:$s, tool:$t, event:$e, ts:now}' > "$dir/.$sid.tmp" \
+# The thanks lasts the whole turn, so the buddy still sees it if a tool starts right away.
+case "$1" in
+  UserPromptSubmit) ;;
+  Stop|SessionStart) thanks=false ;;
+  *) thanks=$(jq -r '.thanks // false' "$dir/$sid" 2>/dev/null || echo false) ;;
+esac
+
+jq -nc --arg s "$state" --arg t "$tool" --arg e "$1" --argjson th "${thanks:-false}" \
+  '{state:$s, tool:$t, event:$e, thanks:$th, ts:now}' > "$dir/.$sid.tmp" \
   && mv "$dir/.$sid.tmp" "$dir/$sid"

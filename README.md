@@ -39,8 +39,14 @@ doing, too.
   waves at you, or waves a flag, with a question mark. When it's asking to run a
   terminal command, a terminal pops up over his head and he bounces excitedly.
   When Claude makes its first move on your prompt, a lightbulb flickers over his
-  head; when a command fails, he's knocked flat with ERROR flashing overhead. He
-  still takes the odd break, so he's never a strict mirror.
+  head; when a command fails, he's knocked flat with ERROR flashing overhead.
+  A permission prompt startles him first (a "!" pops up). While Claude searches
+  he looks up, to the side and down. When it finishes he might throw his hands
+  in the air or twinkle with blue sparkles, and if your prompt thanks Claude,
+  three little hearts float up. New sessions sometimes get a wink. He still
+  takes the odd break, so he's never a strict mirror.
+- **Recharges.** After a nap, or when you come back from a break, a battery over
+  his head charges up to full and he hops.
 - **Reminds you to get outside.** After about an hour of nonstop computer use, he
   sometimes daydreams about trees, mountain trails or birdwatching.
 - **Celebrates the seasons.** Every so often he does something for the time of
