@@ -26,6 +26,10 @@ doing, too.
   overhead in glowing arcs and writes a heart in the air.
   Now and then he hops and waves at a thought bubble holding the Omarchy icon or
   the OMARCHY wordmark, in colors from Omarchy themes (including your current one).
+- **Grooves to your music.** When something is playing on your computer (any app's
+  audio, not calls), he puts on blue headphones and either dances side to side
+  with his eyes shut or spins a DJ set behind a little deck, nodding to the beat
+  as the buttons light up. Detected with `pactl`; he takes them off when it stops.
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
   takes a calm moment. Drag him anywhere and he drops back to the floor.
 - **Follows Claude Code, loosely.** While Claude is editing he types, while it's

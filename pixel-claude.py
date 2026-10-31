@@ -529,6 +529,36 @@ FONT = {"E": ["###", "#..", "##.", "#..", "###"], "R": ["##.", "#.#", "##.", "#.
 TWITCH = ["diamond", "half", "stub", "diamond", "stub", "half"]  # his front arm, 130ms apiece
 SMOKE = (rgba("#B5C0C6"), rgba("#D3DBDF"))
 
+# Music acts, while something plays on the computer. Both wear the blue headphones from the
+# "dancing claude with headphones" GIF: (x, y, w, h) rects, body-relative.
+HEADPHONES = rgba("#14417C")
+PHONES = [(-2, -2.5, 4, 0.5), (-3, -2, 1, 0.5), (2, -2, 1, 0.5), (-3.5, -1.5, 0.5, 0.5),
+          (3, -1.5, 0.5, 0.5), (-4, -1, 0.5, 1), (3.5, -1, 0.5, 1),  # the band
+          (-4.5, 0, 1, 0.5), (3.5, 0, 1, 0.5), (-5, 0.5, 1.5, 2), (3.5, 0.5, 1.5, 2),
+          (-4.5, 2.5, 1, 0.5), (3.5, 2.5, 1, 0.5)]  # the cups
+# groove: the GIF frame by frame, swaying a cell to the side and back with smiling closed eyes.
+GROOVE_FRAMES = [  # (seconds, dx, tilt, back arm dy, front arm dy); arm dy 1 is the GIF's resting arm
+    (0.1, 0, 0, 1, 1), (0.2, 0, 1, 1, 1), (0.2, 0, 0, 0.5, 0.5), (0.2, 0, 0, 0, 1),
+    (0.2, 0, 0, 1, 1), (0.2, 0.75, -1, 1, 1), (0.2, 1, 0, 0.5, 0.5), (0.2, 1, 0, 1, 0),
+    (0.2, 1, 0, 1, 1)]
+GROOVE_LOOP = sum(f[0] for f in GROOVE_FRAMES)
+# dj: the "DJ Claude" picture brought to life. Seen a little from the side behind his decks, head
+# nodding on the beat, his front hand sliding between the buttons as they light up.
+DJ_BEAT = 0.5
+DJ_SHADE = rgba("#B86B4F")
+DJ_COL = {k: rgba(v) for k, v in {
+    "k": "#1C1C1C", "g": "#9B9A91", "l": "#DEDDD2", "G": "#4A4A48", "b": "#1E4E8C", "c": "#6C9EDE"}.items()}
+DJ_DECK = [  # (x, y above the floor, w, h, color)
+    (-2, 3.5, 0.5, 0.5, "g"), (4, 3.5, 0.5, 0.5, "g"),  # knobs
+    (-3, 3, 0.5, 0.5, "k"), (-2.5, 3, 0.5, 0.5, "g"), (-2, 3, 1.5, 0.5, "k"), (3, 3, 2.5, 0.5, "k"),
+    (-3.5, 2.5, 2.5, 1, "g"), (-1, 2.5, 2, 1, "l"), (1, 2.5, 3, 1, "G"), (4, 2.5, 2, 1, "l"),
+    (-3.5, 1.5, 0.5, 1.5, "g"), (-3, 1.5, 0.5, 1.5, "G"), (-1.5, 1.5, 0.5, 1.5, "g"),
+    (-1, 1.5, 0.5, 1.5, "G"), (5, 1.5, 0.5, 1.5, "g"), (5.5, 1.5, 0.5, 1.5, "G")]
+DJ_BUTTONS = (0, 1, 2)  # x of the three buttons along the top
+DJ_HAND = [2, 2, 1, 1, 2, 2, 0, 1]  # which button his hand is on, a beat apiece
+MUSIC_ACTS = ["groove", "dj"]
+CALL_APPS = ("zoom", "teams", "webex", "skype", "slack")  # their audio isn't music
+
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -622,6 +652,8 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "terminal": (0, 5, 8),   # only when Claude asks to run a command
     "idea": (0.5, 2.2, 3.3),  # also the moment Claude starts acting on your prompt
     "error": (0, 3.5, 3.5),  # when a tool fails, or menu
+    "groove": (0, 8, 14),    # only while music plays, or menu
+    "dj": (0, 10, 16),       # likewise
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -692,6 +724,40 @@ class ActivityWatch:
         return 0 if now - self.last_input > INPUT_BREAK else now - self.active_since
 
 
+class MusicWatch:
+    """Whether music is playing: an uncorked app stream in PulseAudio/PipeWire (not a loopback,
+    not a call). A couple of polls in a row either way, so notification blips don't count."""
+
+    def __init__(self):
+        self.playing = False
+        self.streak = 0
+
+    def active(self):
+        try:
+            out = subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
+                                 capture_output=True, text=True, timeout=2).stdout
+            streams = json.loads(out or "[]")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        for s in streams:
+            props = s.get("properties") or {}
+            if s.get("corked") or s.get("mute") or props.get("node.passive") == "true":
+                continue
+            app = " ".join(props.get(k, "") for k in ("application.name", "application.process.binary"))
+            if app.strip() and not any(c in app.lower() for c in CALL_APPS):
+                return True
+        return False
+
+    def poll(self):
+        """Refresh; returns True when it starts or stops."""
+        on = self.active()
+        self.streak = self.streak + 1 if on != self.playing else 0
+        if self.streak >= (2 if on else 3):
+            self.playing, self.streak = on, 0
+            return True
+        return False
+
+
 class ClaudeWatch:
     """Folds the per-session status files into one mood: the most urgent session wins."""
 
@@ -756,6 +822,8 @@ class Buddy:
         self.poll_t = 0.0
         self.user = ActivityWatch()
         self.user_poll_t = 0.0
+        self.music = MusicWatch()
+        self.music_poll_t = 0.0
         self.last_dream = 0.0
         self.last_holiday = self.last_season = time.time() - 10 * 60
         self.fest = None
@@ -819,12 +887,15 @@ class Buddy:
                 and random.random() < 0.6):
             self.set_state("daydream")
             return
+        if self.music.playing and not c.busy and random.random() < 0.85:
+            self.set_state(self.music_act())
+            return
         fest = self.festive_due()
         if fest and random.random() < (0.2 if c.busy else 0.5):
             self.start_festive(*fest)
             return
         if c.busy:
-            if random.random() < 0.75:
+            if random.random() < (0.55 if self.music.playing else 0.75):  # music: more breaks
                 if c.state == "thinking" and random.random() < 0.5:
                     name = "think"
                 else:
@@ -835,7 +906,8 @@ class Buddy:
                         name = "sidetype"
                 self.set_state(name, random.uniform(4, 8))
             else:
-                self.set_state(random.choice(BREAKS), random.uniform(2.5, 4.5))
+                name = self.music_act() if self.music.playing else random.choice(BREAKS)
+                self.set_state(name, random.uniform(2.5, 4.5))
             return
 
         weights = {k: v[0] for k, v in ACTIVITIES.items()}
@@ -949,6 +1021,21 @@ class Buddy:
             return "terminal"
         return random.choice(("call", "flag"))
 
+    def music_act(self):
+        """Dance or DJ, usually switching from whichever he just did."""
+        if self.state in MUSIC_ACTS and random.random() < 0.7:
+            return MUSIC_ACTS[1 - MUSIC_ACTS.index(self.state)]
+        return random.choice(MUSIC_ACTS)
+
+    def on_music(self):
+        """Music just started or stopped: put the headphones on, or take them off."""
+        if self.state in ("held", "fall", "land", "bye", "petted", "error", "call", "flag", "terminal"):
+            return
+        if self.music.playing and not self.claude.busy:
+            self.set_state(self.music_act())
+        elif not self.music.playing and self.state in MUSIC_ACTS:
+            self.set_state("idle", 1.0)
+
     def celebrate(self):
         if random.random() < 0.4:  # a confetti stomp instead of the usual hop
             self.set_state("stomp", 2.0)
@@ -1011,6 +1098,13 @@ class Buddy:
         if self.user_poll_t > 5:
             self.user_poll_t = 0
             self.user.poll()
+
+        self.music_poll_t += dt
+        if self.music_poll_t > 2:
+            self.music_poll_t = 0
+            if self.music.poll():
+                self.on_music()
+                s = self.state
 
         self.poll_t += dt
         if self.poll_t > 0.5:
@@ -1099,6 +1193,9 @@ class Buddy:
         if s == "sleep" and self.mark > 1.3:
             self.mark = 0
             self.spawn(random.choice("zZ"), 2 * self.facing, -8, 1.2 * self.facing, -2.2, 3.2)
+        elif s in MUSIC_ACTS and self.mark > 0.8:
+            self.mark = 0
+            self.spawn("note", random.uniform(-5, 5), -10, random.uniform(-1, 1), -2.2, 1.8)
         elif s == "dance" and self.mark > 0.55:
             self.mark = 0
             self.spawn("note", random.uniform(-5, 5), -9, random.uniform(-1, 1), -2.5, 1.8)
@@ -1212,7 +1309,7 @@ class Buddy:
         s, st, t = self.state, self.st, self.t
         p = {"bob": 0, "legs": [0, 0, 0, 0], "leg_h": 1.5, "arms": ["side", "side"],
              "arm_dy": [0, 0], "eyes": "open", "edx": 0, "edy": 0, "dx": 0, "jump": 0, "lean": 0,
-             "tilt": 0, "side": None, "flat": None,
+             "tilt": 0, "side": None, "flat": None, "body": None,
              "front": [], "bubble": None, "over": [], "grip": [], "hat": None, "glasses": False}
         breathe = 0.5 if int(t / 1.1) % 2 else 0
         if s == "idle":
@@ -1354,6 +1451,26 @@ class Buddy:
             else:
                 if (st - ERROR_SETTLE) % 0.6 < 0.33:
                     p["bubble"] = ("error",)
+        elif s == "groove":
+            t = st % GROOVE_LOOP
+            for d, dx, tilt, back, front in GROOVE_FRAMES:
+                if t < d:
+                    break
+                t -= d
+            p["dx"], p["tilt"], p["arm_dy"] = dx * self.facing, tilt, [back, front]
+            p["eyes"] = "smile"
+            p["over"].append(self.draw_headphones)
+        elif s == "dj":
+            beat = int(st / DJ_BEAT)
+            p["bob"] = 0.5 if st % DJ_BEAT < DJ_BEAT / 2 else 0  # nodding along
+            p["arms"] = ["up" if beat % 16 in (12, 13) else "side", "none"]  # a fist pump now and then
+            p["edy"] = 1.25  # eyes down on the decks
+            if beat % 16 in (12, 13):
+                p["eyes"] = "smile"
+            p["body"] = self.draw_dj_body
+            hand = DJ_HAND[beat % len(DJ_HAND)]
+            p["over"].append(self.draw_headphones)
+            p["front"].append(lambda B, g: self.draw_decks(B, g, hand, beat))
         elif s == "terminal":  # excited little bounces under the terminal
             ph = st % 0.5
             p["jump"] = 0.75 * math.sin(math.pi * ph / 0.5)
@@ -1679,7 +1796,7 @@ class Buddy:
             out.append((GW / 2 - sw / 2, GROUND, sw, 0.5, SHADOW))
 
         # legs, torso, arms
-        for i, lx in enumerate(() if p["side"] is not None or p["flat"] else (-4, -2, 1, 3)):
+        for i, lx in enumerate(() if p["side"] is not None or p["flat"] or p["body"] else (-4, -2, 1, 3)):
             hip = 6 + (rise(lx + 0.5) if p["tilt"] else 0)
             h = g - hip - p["legs"][i]
             if h > 0 and p["lean"]:  # slant from the leaning hips down to planted feet
@@ -1692,6 +1809,8 @@ class Buddy:
                 B(-4 + c, 0, 1, 6, BODY)
         elif p["side"] is not None:
             self.draw_side_body(B, g, p["side"])
+        elif p["body"]:
+            p["body"](B, g)
         elif p["flat"]:
             self.draw_flat_body(B, g, p["flat"])
             p["arms"] = ["none", "none"]
@@ -1747,6 +1866,10 @@ class Buddy:
                 near = x > 0  # the eye nearer his front gets "<"
                 for px, py in ((0, 0), (0.5, 0.5), (0, 1)):
                     B(x + (0.5 - px if near else px), 0.5 + py, 0.5, 0.5, EYE)
+            elif e == "smile":  # shut and smiling, a little U
+                B(x - 0.5 + ex, 1 + ey, 0.5, 0.5, EYE)
+                B(x + 1 + ex, 1 + ey, 0.5, 0.5, EYE)
+                B(x + ex, 1.5 + ey, 1, 0.5, EYE)
             elif e == "happy":
                 B(x - 0.25, 1.0, 0.5, 0.5, EYE)
                 B(x + 0.25, 0.5, 0.5, 0.5, EYE)
@@ -1790,6 +1913,31 @@ class Buddy:
             else:
                 self.glyph(out, pt.kind, lx, pt.y, pt.size, fade)
         return out
+
+    def draw_headphones(self, B, g):
+        for r in PHONES:
+            B(*r, HEADPHONES)
+
+    def draw_dj_body(self, B, g):
+        """Behind the decks, turned a touch toward his front: a shaded brow, the far back leg
+        reaching the floor, and just two legs showing under the table."""
+        B(-4, 0, 8, 6, BODY)
+        B(-4, 0, 7.5, 0.5, DJ_SHADE)
+        B(-5.5, 4, 1, g - 4, BODY)
+        B(-5.5, 4, 0.5, g - 4, DJ_SHADE)
+        B(-4.5, 4, 0.5, 1.5, BODY)
+        for lx in (-0.5, 1.5):
+            B(lx, 6, 1, g - 6, BODY)
+
+    def draw_decks(self, B, g, hand, beat):
+        """The DJ table, the button under his hand lit, and his front hand resting on it."""
+        for x, y, w, h, c in DJ_DECK:
+            B(x, g - y, w, h, DJ_COL[c])
+        for i, x in enumerate(DJ_BUTTONS):
+            B(x, g - 3, 0.5, 0.5, DJ_COL["c" if i == hand and beat % 2 == 0 else "b"])
+        hx = DJ_BUTTONS[hand] - 2
+        B(1.5 + hx, 3.5, 2, 0.5, DJ_SHADE)  # forearm across his front, hand down by the button
+        B(1 + hx, 4, 0.5, 0.5, DJ_SHADE)
 
     def draw_idea(self, B, bulb, blink):
         """Eyes (the front one a touch higher, tipped up as he is) and the bulb overhead."""
@@ -2206,6 +2354,8 @@ class App(Gtk.Application):
                  ("Sparkler", lambda: self.buddy.command("sparkler")),
                  ("Terminal excitement", lambda: self.buddy.command("terminal")),
                  ("Bright idea", lambda: self.buddy.command("idea")),
+                 ("Headphones dance", lambda: self.buddy.command("groove")),
+                 ("DJ set", lambda: self.buddy.command("dj")),
                  ("Oops, an error", lambda: self.buddy.command("error")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
