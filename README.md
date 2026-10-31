@@ -7,7 +7,7 @@ now and then thinking fondly about Omarchy. If you use
 [Claude Code](https://claude.com/claude-code), he loosely follows what Claude is
 doing, too.
 
-![Pixel Claude typing, being petted, hauling a crate, dancing, in a ghost costume, jumping in leaves, building a snowman, celebrating New Year's and napping](assets/preview.gif)
+![Pixel Claude typing, getting an idea, typing side-on, excited by a terminal command, knocked flat by an error, throwing his hands in the air, dancing in headphones, DJing, blowing bubbles, waving a heart, hiking, charging his battery, fiddling with an oscilloscope, sparkling and sending up hearts](assets/preview.gif)
 
 > An unofficial fan project. Not made by, affiliated with, or endorsed by Anthropic.
 > "Claude" is a trademark of Anthropic.
