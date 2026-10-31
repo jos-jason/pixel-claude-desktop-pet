@@ -522,6 +522,8 @@ IDEA_LOOP = sum(f[1] for f in IDEA_FRAMES)
 # error: the "error claude" GIF. Knocked flat on his back, legs in the air, X X eyes and one arm
 # twitching, while a red ERROR flashes overhead and little puffs of smoke rise.
 ERROR_RED = rgba("#F03C2E")
+ERROR_BOUNCES = [(0.3, 1.2), (0.18, 0.45)]  # (seconds, height in cells) as he lands flat
+ERROR_SETTLE = sum(d for d, _ in ERROR_BOUNCES)  # ERROR and the smoke start once he's still
 FONT = {"E": ["###", "#..", "##.", "#..", "###"], "R": ["##.", "#.#", "##.", "#.#", "#.#"],
         "O": [".#.", "#.#", "#.#", "#.#", ".#."]}
 TWITCH = ["diamond", "half", "stub", "diamond", "stub", "half"]  # his front arm, 130ms apiece
@@ -619,7 +621,7 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "sparkler": (1, 0, 0),   # fixed length: SPARK_DUR
     "terminal": (0, 5, 8),   # only when Claude asks to run a command
     "idea": (0.5, 2.2, 3.3),  # also the moment Claude starts acting on your prompt
-    "error": (0, 3, 3),      # when a tool fails, or menu
+    "error": (0, 3.5, 3.5),  # when a tool fails, or menu
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -922,7 +924,7 @@ class Buddy:
         if c.state == "waiting":
             self.set_state(self.attention(), random.uniform(5, 8))
         elif c.state == "error":
-            self.set_state("error", 3.0)
+            self.set_state("error", 3.5)
         elif c.state == "working" and self.fresh_prompt:  # first move on a new prompt: an idea!
             self.fresh_prompt = False
             self.set_state("idea", 2.2)
@@ -1060,7 +1062,8 @@ class Buddy:
             elif fr in (0, 4) and self.frame_k:
                 self.puff(2)
 
-        if s == "error" and self.advanced(int((self.st + 0.33) / 0.6)):  # as ERROR blinks off
+        if (s == "error" and self.st >= ERROR_SETTLE  # as ERROR blinks off
+                and self.advanced(int((self.st - ERROR_SETTLE + 0.33) / 0.6))):
             self.spawn("puff", self.facing * random.uniform(-0.5, 1.5), -8.5, 0, -2.5, 0.9)
 
         if s == "sparkler":
@@ -1342,8 +1345,15 @@ class Buddy:
         elif s == "error":
             p["flat"] = TWITCH[int(st / 0.13) % len(TWITCH)]
             p["eyes"] = "none"
-            if (st % 0.6) < 0.33:
-                p["bubble"] = ("error",)
+            t = st
+            for d, height in ERROR_BOUNCES:  # bouncing to a stop, flat on his back
+                if t < d:
+                    p["jump"] = height * math.sin(math.pi * t / d)
+                    break
+                t -= d
+            else:
+                if (st - ERROR_SETTLE) % 0.6 < 0.33:
+                    p["bubble"] = ("error",)
         elif s == "terminal":  # excited little bounces under the terminal
             ph = st % 0.5
             p["jump"] = 0.75 * math.sin(math.pi * ph / 0.5)
