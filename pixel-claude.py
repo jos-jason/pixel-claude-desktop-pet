@@ -573,6 +573,19 @@ BATTERY_EDGE = rgba("#3A3A3A")
 BATTERY_GAP = rgba("#FFFFFF")
 BATTERY_FILL = rgba("#4CAF65")
 BATTERY_FILL_T = 2.2  # seconds to charge; then it's full
+# The battery shows the computer's real charge when there is one (/sys/class/power_supply).
+BATTERY_LEVELS = (50, 20, 10, 5)  # dropping through these pops it up
+BATTERY_AMBER = rgba("#F2B33D")
+BATTERY_RED = rgba("#E5484D")
+BOLT = ["..x", ".x.", "xxx", ".x.", "x.."]
+BOLT_COL = rgba("#FFD34D")
+DIGITS = {  # 3x5, for the percentage over the battery
+    "0": ["xxx", "x.x", "x.x", "x.x", "xxx"], "1": [".x.", "xx.", ".x.", ".x.", "xxx"],
+    "2": ["xxx", "..x", "xxx", "x..", "xxx"], "3": ["xxx", "..x", ".xx", "..x", "xxx"],
+    "4": ["x.x", "x.x", "xxx", "..x", "..x"], "5": ["xxx", "x..", "xxx", "..x", "xxx"],
+    "6": ["xxx", "x..", "xxx", "x.x", "xxx"], "7": ["xxx", "..x", ".x.", ".x.", ".x."],
+    "8": ["xxx", "x.x", "xxx", "x.x", "xxx"], "9": ["xxx", "x.x", "xxx", "..x", "xxx"],
+    "%": ["x.x", "..x", ".x.", "x..", "x.x"]}
 LOOKS = [  # search: (eye dx, eye dy, front arm dy) for looking up, to the side, and down
     (0, -0.75, 0), (0.5, -0.25, -1), (0, 1.75, 0)]
 LOOK_HOLD = 1.0
@@ -798,6 +811,56 @@ class MusicWatch:
         return False
 
 
+class BatteryWatch:
+    """The computer's battery: its level, whether it's charging, and the moments worth a pop-up
+    (dropping through BATTERY_LEVELS, plugging in, reaching full). No battery: level is None."""
+
+    def __init__(self):
+        base = "/sys/class/power_supply"
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            names = []
+        self.bat = next((os.path.join(base, n) for n in names if self.read(os.path.join(base, n, "type")) == "Battery"), None)
+        self.level = self.status = None
+        self.poll()
+
+    @staticmethod
+    def read(path):
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
+    @property
+    def charging(self):
+        return self.status == "Charging"
+
+    def poll(self):
+        """Refresh; returns "low" (with self.crossed set), "plug", "full", or None."""
+        if not self.bat:
+            return None
+        cap, status = self.read(os.path.join(self.bat, "capacity")), self.read(os.path.join(self.bat, "status"))
+        if not (cap or "").isdigit():
+            return None
+        prev, was = self.level, self.status
+        self.level, self.status = min(100, int(cap)), status
+        if prev is None:
+            return None  # first look: nothing to react to yet
+        if status == "Charging" and was in ("Discharging", None):
+            return "plug"
+        if (status == "Full" or self.level == 100) and status != "Discharging" \
+                and not (was == "Full" or prev == 100):
+            return "full"
+        if status == "Discharging":
+            hit = [t for t in BATTERY_LEVELS if self.level <= t < prev]
+            if hit:
+                self.crossed = min(hit)
+                return "low"
+        return None
+
+
 class ClaudeWatch:
     """Folds the per-session status files into one mood: the most urgent session wins."""
 
@@ -866,6 +929,9 @@ class Buddy:
         self.user_poll_t = 0.0
         self.music = MusicWatch()
         self.music_poll_t = 0.0
+        self.battery = BatteryWatch()
+        self.battery_poll_t = 0.0
+        self.batt_alert = None  # the level he's warning about, on a low-battery pop-up
         self.last_dream = 0.0
         self.last_holiday = self.last_season = time.time() - 10 * 60
         self.fest = None
@@ -886,6 +952,7 @@ class Buddy:
         self.beat_k = -1  # last one-off moment fired (see beat)
         self.frame_k = -1  # last frame seen (see advanced)
         self.cheer = False
+        self.batt_alert = None
         if name == "explore":  # head for whichever side has room for the trip
             self.dur = EXPLORE_DUR
             self.ex0 = self.x
@@ -1158,6 +1225,15 @@ class Buddy:
                 if s in ("idle", "look", "walk", "content", "sleep", "daydream", "read", "coffee"):
                     self.set_state("recharged")
                     s = self.state
+
+        self.battery_poll_t += dt
+        if self.battery_poll_t > 15:
+            self.battery_poll_t = 0
+            ev = self.battery.poll()
+            if ev and s not in ("held", "fall", "land", "bye", "error", "call", "flag", "terminal", "shocked"):
+                self.set_state("recharged")
+                self.batt_alert = self.battery.crossed if ev == "low" else None
+                s = self.state
 
         self.music_poll_t += dt
         if self.music_poll_t > 2:
@@ -1550,14 +1626,28 @@ class Buddy:
             p["bob"] = 0.5 if int(st / 0.5) % 2 else 0
             p["arm_dy"] = [p["bob"], p["bob"]]
             p["over"].append(lambda B, g: self.draw_hearts(B, st))
-        elif s == "recharged":
-            full = st >= BATTERY_FILL_T
-            if full and st < BATTERY_FILL_T + 0.6:  # charged! a hop
-                p["jump"] = 1.5 * math.sin(math.pi * (st - BATTERY_FILL_T) / 0.6)
-                p["arms"] = ["up", "up"]
-            p["eyes"] = "happy" if full else p["eyes"]
-            p["edy"] = 0 if full else -0.25  # watching it fill
-            p["over"].append(lambda B, g: self.draw_battery(B, min(1, st / BATTERY_FILL_T), st))
+        elif s == "recharged":  # the battery over his head, filling to the computer's real charge
+            bat = self.battery
+            level, charging = (100, False) if bat.level is None else (bat.level, bat.charging)
+            low = self.batt_alert or (level if level <= 20 and not charging else None)
+            filled = max(0.6, BATTERY_FILL_T * level / 100)
+            k = min(level, 100 * st / BATTERY_FILL_T) / 100
+            p["edy"] = -0.25  # watching it fill
+            if st >= filled:
+                if low and low <= 10:  # nearly flat: drooping, eyes heavy
+                    p["eyes"] = "closed" if (st % 1.2) > 0.4 else "blink"
+                    p["bob"], p["arm_dy"] = 1, [1, 1]
+                elif low and low <= 20:
+                    p["eyes"] = "wide"
+                elif not low:  # charged up (or halfway): a hop
+                    p["edy"] = 0
+                    p["eyes"] = "happy"
+                    if st < filled + 0.6 and (charging or level > 50):
+                        p["jump"] = 1.5 * math.sin(math.pi * (st - filled) / 0.6)
+                        p["arms"] = ["up", "up"]
+            blink = st >= filled and (low or (level == 100 and st < filled + 1.0))
+            p["over"].append(lambda B, g: self.draw_battery(
+                B, k, st, level if bat.level is not None else None, charging, bool(blink)))
         elif s == "search":  # the "Looking up / to the side / down" stills, in turn
             p["edx"], p["edy"], front = LOOKS[int(st / LOOK_HOLD) % len(LOOKS)]
             p["arm_dy"] = [0, front]
@@ -2066,17 +2156,27 @@ class Buddy:
             n, m = len(beat[0]), len(beat)
             self.art(B, beat, 3.25 - n / 4, -2.5 - m / 2 + drift, HEART_RED)
 
-    def draw_battery(self, B, k, st):
-        """The "Battery full" still, charging up from empty; it blinks once it's full."""
-        if k >= 1 and int((st - BATTERY_FILL_T) / 0.25) % 2 and st < BATTERY_FILL_T + 1.0:
+    def draw_battery(self, B, k, st, level, charging, blink):
+        """The "Battery full" still, filled to k (0-1), with the real percentage over it when
+        there's a battery, a bolt while charging, and blinking when it's worth noticing."""
+        if blink and int(st / 0.25) % 2:
             return
         x, y = -3.5, -6.5
         B(x, y, 6.5, 3, BATTERY_EDGE)
         B(x + 6.5, y + 1, 0.5, 1, BATTERY_EDGE)  # the nub
         B(x + 0.5, y + 0.5, 5.5, 2, BATTERY_GAP)
         w = math.ceil(k * 9) * 0.5  # fills a half-cell column at a time
+        pct = 100 * k if level is None else level
+        col = BATTERY_RED if pct <= 10 else BATTERY_AMBER if pct <= 20 else BATTERY_FILL
         if w:
-            B(x + 1, y + 1, w, 1, BATTERY_FILL)
+            B(x + 1, y + 1, w, 1, col)
+        if charging:
+            self.art(B, BOLT, x + 7.5, y + 0.25, BOLT_COL)
+        if level is not None:  # "80%", centered over the battery
+            text = f"{level}%"
+            left = -(len(text) * 2 - 0.5) / 2  # each glyph 1.5 cells wide, half a cell apart
+            for i, ch in enumerate(text):
+                self.art(B, DIGITS[ch], left + i * 2, y - 3, BATTERY_EDGE)
 
     def draw_scope(self, B, g, st, lock, knob, turn):
         """The oscilloscope on the floor in front of him, its trace following the knobs."""

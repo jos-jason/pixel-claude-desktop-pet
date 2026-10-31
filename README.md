@@ -45,8 +45,12 @@ doing, too.
   in the air or twinkle with blue sparkles, and if your prompt thanks Claude,
   three little hearts float up. New sessions sometimes get a wink. He still
   takes the odd break, so he's never a strict mirror.
-- **Recharges.** After a nap, or when you come back from a break, a battery over
-  his head charges up to full and he hops.
+- **Watches your battery.** After a nap, or when you come back from a break, a
+  battery pops up over his head showing your computer's real charge (with the
+  percentage, and a bolt while charging). It also pops up when the battery drops
+  through 50%, 20%, 10% and 5%, when you plug in, and when it's full. He hops when
+  it's charged, looks worried at 20%, and droops at 10%. (No battery? It just
+  fills to full.)
 - **Reminds you to get outside.** After about an hour of nonstop computer use, he
   sometimes daydreams about trees, mountain trails or birdwatching.
 - **Celebrates the seasons.** Every so often he does something for the time of
