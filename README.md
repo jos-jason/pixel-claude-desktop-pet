@@ -22,7 +22,8 @@ doing, too.
   just sways and smiles, looking happy and content.
   And now and then he pulls a laptop out of thin air, sets it on the floor and
   types away side-on.
-  He blows bubbles from a little wand, each one drifting up and popping.
+  He blows bubbles from a little wand, each one drifting up and popping, and
+  sometimes heads off on a hike with a bedroll strapped on and a hiking pole.
   He also has a sparkler: he holds it up fizzing, points it out, waves it
   overhead in glowing arcs and writes a heart in the air.
   Now and then he hops and waves at a thought bubble holding the Omarchy icon or
@@ -32,7 +33,7 @@ doing, too.
   with his eyes shut or spins a DJ set behind a little deck, nodding to the beat
   as the buttons light up. Detected with `pactl`; he takes them off when it stops.
 - **Loves attention.** Left-click to pet him: he hops, basks in hearts, then
-  takes a calm moment. Drag him anywhere and he drops back to the floor.
+  takes a calm moment (or waves a big red heart back at you). Drag him anywhere and he drops back to the floor.
 - **Follows Claude Code, loosely.** While Claude is editing he types, while it's
   reading or searching he reads, and while it runs commands he types or hauls
   crates. When Claude is thinking, he thinks. When it finishes, he celebrates

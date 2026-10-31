@@ -616,6 +616,16 @@ BUBBLE_CYCLE = 2.4  # seconds per bubble
 BUBBLE_GROW = (0.7, 1.1, 1.5)  # when it reaches each size; at the last it lets go
 BUBBLE_FLOAT = 2.6  # seconds in the air before it pops
 
+# heartwave: the "Heart waving Claude" still. His back arm up a cell, holding a big red heart
+# (half-cell art, its tip in his hand) that he waves to and fro.
+HEART_WAVE = [".xx...xx.", "xxxx.xxxx", "xxxxxxxxx", ".xxxxxxx.", "..xxxxx..", "...xxx...", "....x...."]
+HEART_WAVE_BEAT = 0.3
+# hike: the "Backpacking Claude" render in pixels. A green bedroll strapped across his head and
+# a black hiking pole in his front hand, planted with every other step.
+HIKE_COL = {k: rgba(v) for k, v in {
+    "roll": "#5DC97A", "roll_hi": "#8FE3A6", "roll_lo": "#3E9E58", "cap": "#79D893", "spiral": "#3E9E58",
+    "strap": "#8A5A3C", "strap_d": "#6B442C", "pole": "#1E1E1E", "grip": "#4A4A4A"}.items()}
+
 
 SEASON_EVERY = 40 * 60        # a seasonal act at most this often
 HOLIDAY_EVERY = 15 * 60       # holiday acts in the days around a holiday
@@ -720,6 +730,8 @@ ACTIVITIES = {  # name: (weight, min seconds, max seconds)
     "recharged": (0, 3.6, 3.6),  # after a nap, or when you're back from a break
     "search": (1, 3, 6),         # looks up, to the side and down; also while Claude searches
     "bubbles": (1.2, 7, 11),     # blowing bubbles
+    "heartwave": (0.5, 2.5, 3.5),  # also when petted, thanked, or a session says hello
+    "hike": (1, 0, 0),           # walks a long way (target-based, like walk); also instead of a daydream
 }
 
 INPUT_BREAK = 5 * 60   # this long with no keyboard/mouse input counts as a real break
@@ -979,7 +991,7 @@ class Buddy:
             self.dur = GYM_DUR
         elif name == "sparkler":
             self.dur = SPARK_DUR
-        elif name in ("walk", "carry"):
+        elif name in ("walk", "carry", "hike"):
             span = self.screen_w * random.uniform(0.15, 0.45)
             self.target = min(self.max_x, max(0, self.x + random.choice((-1, 1)) * span))
             if abs(self.target - self.x) < 40:
@@ -1009,7 +1021,7 @@ class Buddy:
             return
         if (self.user.active_for > LONG_ACTIVE and time.time() - self.last_dream > DREAM_EVERY
                 and random.random() < 0.6):
-            self.set_state("daydream")
+            self.set_state(random.choice(("daydream", "hike")))  # dream of the outdoors, or go
             return
         if self.music.playing and not c.busy and random.random() < 0.85:
             self.set_state(self.music_act())
@@ -1135,7 +1147,7 @@ class Buddy:
         elif c.busy and not was_busy:
             self.fresh_prompt = True
             if c.thanks:  # you thanked Claude: a little burst of love
-                self.set_state("hearts")
+                self.set_state(random.choice(("hearts", "heartwave")))
             elif self.state == "sleep":
                 self.set_state("shocked")  # startled awake; work comes next
             elif self.state in ("call", "flag", "terminal") or random.random() < 0.7:
@@ -1143,7 +1155,7 @@ class Buddy:
         elif prev == "waiting" and self.state in ("call", "flag", "terminal"):
             self.set_state("idle", 0.6)
         elif c.state == "hello" and self.state not in ("type", "read", "think"):
-            self.set_state(random.choice(("wave", "wink")), 1.6)
+            self.set_state(random.choice(("wave", "wink", "heartwave")), 1.6)
 
     def attention(self):
         """How to get the user's attention: a terminal command to OK gets the excited terminal."""
@@ -1186,6 +1198,9 @@ class Buddy:
     # ---------- interactions ----------
     def pet(self):
         if self.state in ("bye", "held", "fall"):
+            return
+        if random.random() < 0.3:  # sometimes he waves a big heart back at you
+            self.set_state("heartwave")
             return
         for i in range(3):
             self.spawn("heart", random.uniform(-4, 1), -11 - i, random.uniform(-1, 1), -3, 1.4)
@@ -1269,8 +1284,8 @@ class Buddy:
             self.blink_until = self.t + 0.13
             self.blink_at = self.t + random.choice((0.25, 2.5, 3.5, 5.0))
 
-        if s in ("walk", "carry", "sweep"):
-            speed = {"walk": 36, "carry": 24, "sweep": 10}[s]
+        if s in ("walk", "carry", "sweep", "hike"):
+            speed = {"walk": 36, "carry": 24, "sweep": 10, "hike": 22}[s]
             if s == "sweep":
                 nx = self.x + self.facing * speed * dt
                 if nx <= 0 or nx >= self.max_x:
@@ -1485,13 +1500,17 @@ class Buddy:
             p["bob"] = breathe
             if st > self.dur * 0.6:
                 p["bubble"] = ("pop", "q")
-        elif s in ("walk", "carry", "held"):
+        elif s in ("walk", "carry", "held", "hike"):
             rate = 10 if s == "held" else 7
             ph = int(st * rate) % 2
             p["legs"] = [0.5, 0, 0.5, 0] if ph else [0, 0.5, 0, 0.5]
             p["bob"] = 0.5 * ph if s != "held" else 0
             p["edx"] = 0.5 if s != "held" else 0
             p["arm_dy"] = [0.5 * ph, 0.5 * (1 - ph)]
+            if s == "hike":
+                p["arms"] = ["side", "none"]
+                p["over"].append(lambda B, g: self.draw_bedroll(B))
+                p["front"].append(lambda B, g: self.draw_pole(B, g, ph))
             if s == "carry":
                 p["arms"] = ["up", "up"]
                 p["front"].append(self.draw_box)
@@ -1674,6 +1693,12 @@ class Buddy:
             blink = st >= filled and (low or (level == 100 and st < filled + 1.0))
             p["over"].append(lambda B, g: self.draw_battery(
                 B, k, st, level if bat.level is not None else None, charging, bool(blink)))
+        elif s == "heartwave":
+            k = int(st / HEART_WAVE_BEAT) % 2  # to and fro
+            p["arms"] = ["none", "side"]
+            p["eyes"] = "happy" if int(st / 1.2) % 2 else "open"
+            p["bob"] = 0.5 * k
+            p["over"].append(lambda B, g: self.draw_heart_wave(B, k))
         elif s == "bubbles":
             p["leg_h"] = 2.5  # the picture's longer legs
             p["arms"], p["eyes"] = ["none", "none"], "none"
@@ -2216,6 +2241,32 @@ class Buddy:
             for i, ch in enumerate(text):
                 self.art(B, DIGITS[ch], left + i * 2, y - 3, BATTERY_EDGE)
 
+    def draw_heart_wave(self, B, k):
+        """His back arm raised a cell, the heart's tip in his hand; on the "fro" beat the arm
+        reaches half a cell higher and the heart leans out."""
+        B(-6, 1 - 0.5 * k, 2, 2 + 0.5 * k, BODY)
+        self.art(B, HEART_WAVE, -8 - 0.5 * k, -2.5 - 0.5 * k, HEART_RED)
+
+    def draw_bedroll(self, B):
+        """A rolled-up green bedroll across the top of his head, strapped down with two straps."""
+        C = HIKE_COL
+        B(-3.5, -1.5, 7, 1.5, C["roll"])
+        B(-3.5, -1.5, 7, 0.5, C["roll_hi"])
+        B(-3.5, -0.5, 7, 0.5, C["roll_lo"])
+        B(3.5, -1.5, 0.5, 1.5, C["cap"])  # the rolled end
+        B(3.5, -1, 0.5, 0.5, C["spiral"])
+        for x in (-2, 1):
+            B(x, -2, 1, 3, C["strap"])
+            B(x, -2, 1, 0.5, C["strap_d"])
+
+    def draw_pole(self, B, g, ph):
+        """The hiking pole in his front hand, planted ahead on every other step."""
+        C = HIKE_COL
+        dx = 0.5 if ph else 0
+        B(4, 2, 2 + dx, 1.5, BODY)  # his arm out to the grip
+        B(5.5 + dx, 0, 0.5, 1, C["grip"])
+        B(5.5 + dx, 1, 0.5, g - 1, C["pole"])
+
     def draw_bubble_body(self, B, g, blink):
         """Three-quarters toward his front, front lifted: shaded far edge, eyes shifted forward,
         the back arm low, the front hand up holding the wand."""
@@ -2750,6 +2801,8 @@ class App(Gtk.Application):
                  ("Recharge", lambda: self.buddy.command("recharged")),
                  ("Look around", lambda: self.buddy.command("search")),
                  ("Blow bubbles", lambda: self.buddy.command("bubbles")),
+                 ("Wave a heart", lambda: self.buddy.command("heartwave")),
+                 ("Go hiking", lambda: self.buddy.command("hike")),
                  ("Oops, an error", lambda: self.buddy.command("error")),
                  ("Nap time", lambda: self.buddy.command("sleep")),
                  ("Goodbye", lambda: self.buddy.command("bye"))]
